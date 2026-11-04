@@ -129,6 +129,11 @@ keyboard hook, and it changes Caps Lock alone. The details are in
 
 ## Notes
 
+- Lyrics come from [LRCLIB](https://lrclib.net), a free database people add
+  lyrics to. Some songs have none, some have mistakes, and some are timed for a
+  different version of the song, so lines can show up early or late. That comes
+  from the lyrics source, not from BUKU. For now you can line them up by hand on
+  the media card, and I'll try to make this better in a future version if I can.
 - Brightness changes show when Windows' brightness setting changes (the
   brightness keys on most laptops, the Windows slider). External monitors
   adjusted with their own buttons don't tell Windows, so those can't be shown.
