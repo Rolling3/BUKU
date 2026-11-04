@@ -194,6 +194,8 @@ struct App {
     caps_down: bool,
 
     hover: bool,
+    /// The pin on the card is on: the card stays open without the pointer.
+    pinned: bool,
     tracking_mouse: bool,
     hot: Option<Button>,
     pressed: Option<Button>,
@@ -481,6 +483,7 @@ impl App {
             caps_on: unsafe { GetKeyState(VK_CAPITAL.0 as i32) } & 1 != 0,
             caps_down: false,
             hover: false,
+            pinned: false,
             tracking_mouse: false,
             hot: None,
             pressed: None,

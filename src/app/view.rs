@@ -81,13 +81,8 @@ impl App {
         // card, which comes back when the notice ends.
         let notice = matches!(self.hud, Some(Hud::Pomodoro { .. } | Hud::Water { .. }));
         // The card stays open while the task text box is, even with the pointer on the box.
-        if (self.hover || self.input.is_some() || self.drag_over) && !notice {
-            View::Card
-        } else if self.hud.is_some() {
-            View::Hud
-        } else {
-            View::Collapsed
-        }
+        let open = self.hover || self.input.is_some() || self.drag_over;
+        view_for(open, self.pinned, notice, self.hud.is_some())
     }
 
     pub(super) fn size_of(&self, view: View) -> (f32, f32) {
@@ -322,6 +317,7 @@ impl App {
                     page: self.page,
                     hot: self.hot,
                     body,
+                    pinned: self.pinned,
                 })
             }
         };
@@ -455,5 +451,38 @@ mod shelf_icon_tests {
         // A file on a drive that wasn't plugged in yet.
         assert!(!icon_lookup_due(Some((false, Duration::from_millis(16)))));
         assert!(icon_lookup_due(Some((false, ICON_RETRY))));
+    }
+}
+
+/// What the notch shows: the card while it's open (hovered, pinned, typing into
+/// it or taking a drop) unless a notice is due, else a pop-up, else nothing.
+fn view_for(open: bool, pinned: bool, notice: bool, hud: bool) -> View {
+    if (open || pinned) && !notice {
+        View::Card
+    } else if hud {
+        View::Hud
+    } else {
+        View::Collapsed
+    }
+}
+
+#[cfg(test)]
+mod pinned_card_tests {
+    use super::*;
+
+    #[test]
+    fn a_pinned_card_should_stay_open_without_the_pointer() {
+        assert_eq!(view_for(false, true, false, false), View::Card);
+        assert_eq!(view_for(false, false, false, false), View::Collapsed);
+    }
+
+    #[test]
+    fn a_notice_should_still_show_over_a_pinned_card() {
+        assert_eq!(view_for(false, true, true, true), View::Hud);
+    }
+
+    #[test]
+    fn a_volume_change_should_not_cover_a_pinned_card() {
+        assert_eq!(view_for(false, true, false, true), View::Card);
     }
 }

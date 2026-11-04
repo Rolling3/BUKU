@@ -29,6 +29,10 @@ const GLYPH_ADD: &str = "\u{E710}";
 const GLYPH_REMOVE: &str = "\u{E738}";
 const GLYPH_CHECK: &str = "\u{E73E}";
 const GLYPH_CLOSE: &str = "\u{E711}";
+const GLYPH_PIN: &str = "\u{E718}";
+const GLYPH_PINNED: &str = "\u{E840}";
+/// The pin's head, filled: drawn under the outline while the pin is on.
+const GLYPH_PINNED_FILL: &str = "\u{E842}";
 const GLYPH_CHEVRON_LEFT: &str = "\u{E76B}";
 const GLYPH_CHEVRON_RIGHT: &str = "\u{E76C}";
 
@@ -53,6 +57,8 @@ const PAGES: [(Page, &str); 5] = [
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Button {
     Tab(Page),
+    /// Top right: keeps the card open when the pointer leaves.
+    Pin,
     Previous,
     PlayPause,
     Next,
@@ -151,6 +157,8 @@ pub struct Card<'a> {
     pub page: Page,
     pub hot: Option<Button>,
     pub body: PageBody<'a>,
+    /// The card stays open until the pin is clicked again.
+    pub pinned: bool,
 }
 
 /// What each page shows, for hit-testing without building a whole `Card`.
@@ -203,6 +211,12 @@ const VOLUME_ICON_X: f32 = 130.0;
 const VOLUME_BAR_LEFT: f32 = 112.0;
 const VOLUME_BAR_RIGHT: f32 = 24.0;
 const VOLUME_HIT_H: f32 = 16.0;
+
+// The pin, in the card's top right corner: clear of Next, the last Shelf
+// tile's remove button and the first task's delete button.
+const PIN_X: f32 = 10.0;
+const PIN_Y: f32 = 12.0;
+const PIN_R: f32 = 8.0;
 
 // The lyric line, with a step button at each end, between the volume row and
 // the progress bar; the offset sits between the two clocks under the bar.
@@ -266,6 +280,14 @@ fn hits(kind: PageKind, width: f32) -> Vec<(Button, Hit)> {
             )
         })
         .collect();
+    hits.push((
+        Button::Pin,
+        Hit::Circle {
+            cx: width - PIN_X,
+            cy: PIN_Y,
+            r: PIN_R,
+        },
+    ));
     let circle = |cx: f32, r: f32| Hit::Circle { cx, cy: 50.0, r };
     match kind {
         PageKind::Music { lyrics, offset } => {
@@ -469,6 +491,39 @@ impl Painter<'_> {
             PageBody::Shelf(shelf) => self.shelf(shelf, card.hot),
         }
         self.tabs(card.page, card.hot);
+        self.pin(card.pinned, card.hot);
+    }
+
+    /// The pin: dim while off, in the accent colour while it keeps the card open.
+    fn pin(&self, pinned: bool, hot: Option<Button>) {
+        let (cx, cy) = (self.width - PIN_X, PIN_Y);
+        if hot == Some(Button::Pin) {
+            self.circle(cx, cy, PIN_R + 2.0, HOT);
+        }
+        let (glyph, color) = if pinned {
+            (GLYPH_PINNED, accent::current())
+        } else if hot == Some(Button::Pin) {
+            (GLYPH_PIN, TEXT)
+        } else {
+            (GLYPH_PIN, TEXT_DIM)
+        };
+        let r = PIN_R;
+        let layers: &[&str] = if pinned {
+            &[GLYPH_PINNED_FILL, glyph]
+        } else {
+            &[glyph]
+        };
+        for layer in layers {
+            self.text(
+                layer,
+                &self.gfx.fonts.icon_small,
+                cx - r,
+                cy - r,
+                r * 2.0,
+                r * 2.0,
+                color,
+            );
+        }
     }
 
     fn tabs(&self, selected: Page, hot: Option<Button>) {
@@ -1223,6 +1278,68 @@ mod edge_case_tests {
         assert_eq!(
             button_at(PageKind::Focus, width, x, 50.0),
             Some(Button::FocusStartPause)
+        );
+    }
+}
+
+#[cfg(test)]
+mod pin_tests {
+    use super::*;
+
+    fn at(kind: PageKind, x: f32, y: f32) -> Option<Button> {
+        hits(kind, CARD_W)
+            .into_iter()
+            .find(|(_, hit)| hit.contains(x, y))
+            .map(|(button, _)| button)
+    }
+
+    const KINDS: [PageKind; 6] = [
+        PageKind::Music {
+            lyrics: true,
+            offset: true,
+        },
+        PageKind::Idle,
+        PageKind::Focus,
+        PageKind::Water,
+        PageKind::Tasks {
+            rows: 4,
+            done: 0b1111,
+            any_done: true,
+            can_add: true,
+        },
+        PageKind::Shelf { count: 6 },
+    ];
+
+    #[test]
+    fn the_pin_should_be_in_the_top_right_corner_of_every_page() {
+        let (x, y) = (CARD_W - PIN_X, PIN_Y);
+        assert!(
+            KINDS
+                .iter()
+                .all(|&kind| at(kind, x, y) == Some(Button::Pin))
+        );
+    }
+
+    #[test]
+    fn the_pin_should_not_take_clicks_from_the_buttons_near_it() {
+        let w = CARD_W;
+        assert_eq!(
+            [
+                at(KINDS[0], w - 38.0, 44.0),
+                at(KINDS[4], w - 40.0, 24.0),
+                at(
+                    KINDS[5],
+                    tile_x(SHELF_TILES - 1) + TILE_W - 9.0,
+                    TILE_Y + 9.0
+                ),
+                at(KINDS[2], w - 52.0, 50.0),
+            ],
+            [
+                Some(Button::Next),
+                Some(Button::TaskDelete(0)),
+                Some(Button::ShelfRemove(SHELF_TILES as u8 - 1)),
+                Some(Button::FocusReset),
+            ]
         );
     }
 }

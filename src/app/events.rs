@@ -2,6 +2,13 @@
 
 use super::*;
 
+/// Whether a new pop-up replaces the one in `self.hud`. Over an open card a
+/// plain pop-up (volume, brightness, Caps Lock, language) can't be seen, so it
+/// must not take the place of a notice that is showing over the card.
+fn replaces_hud(notice_showing: bool, new_is_notice: bool, card_open: bool) -> bool {
+    !(notice_showing && !new_is_notice && card_open)
+}
+
 /// Whether moving to `page` must close the task text box: it belongs to the
 /// Tasks page, and staying open under another page would add a task unseen.
 fn closes_task_input(input_open: bool, page: Page) -> bool {
@@ -86,6 +93,12 @@ impl App {
     // ----- HUDs -----
 
     pub(super) fn show_hud(&mut self, hud: Hud) {
+        let is_notice = |hud: &Hud| matches!(hud, Hud::Pomodoro { .. } | Hud::Water { .. });
+        let card_open = self.hover || self.pinned || self.input.is_some() || self.drag_over;
+        let notice_showing = self.hud.as_ref().is_some_and(is_notice);
+        if !replaces_hud(notice_showing, is_notice(&hud), card_open) {
+            return;
+        }
         let duration = match hud {
             Hud::Volume { .. } | Hud::Brightness(_) | Hud::CapsLock(_) | Hud::Language(_) => HUD_MS,
             _ => NOTICE_MS,
@@ -601,6 +614,15 @@ impl App {
             self.hot = None;
         }
         match button {
+            Some(Button::Pin) => {
+                self.pinned = !self.pinned;
+                if !self.pinned {
+                    // Hover follows where the pointer really is: gone, the card
+                    // closes as a leave would; there, a pending open is settled.
+                    self.set_hover(self.pointer_over_window());
+                }
+                self.retarget();
+            }
             Some(Button::Tab(page)) => {
                 self.show_page(page);
                 self.hot = None;
@@ -1011,6 +1033,20 @@ impl App {
 mod tests {
     use super::*;
     use windows::Win32::System::Ole::{DROPEFFECT_COPY, DROPEFFECT_NONE};
+
+    #[test]
+    fn a_pop_up_should_not_cut_short_a_notice_over_an_open_card() {
+        // (notice showing, new one is a notice, card open) -> new one replaces it
+        assert_eq!(
+            [
+                replaces_hud(true, false, true),
+                replaces_hud(true, false, false),
+                replaces_hud(true, true, true),
+                replaces_hud(false, false, true),
+            ],
+            [false, true, true, true]
+        );
+    }
 
     #[test]
     fn leaving_the_tasks_page_should_close_an_open_task_box() {

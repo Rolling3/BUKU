@@ -13,6 +13,8 @@
 ## Features
 
 - **Volume, brightness and Caps Lock** pop up in the notch when they change.
+- **Pin**: the pin in the card's top right corner keeps the card open when the
+  pointer leaves; click it again to let the card close as usual.
 - **Now playing**: hover the notch to see the current track and its album art
   from any app that reports to Windows (Spotify, browsers, media players), with
   previous, play/pause and next.
