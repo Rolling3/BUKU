@@ -10,9 +10,11 @@ fn caps_press_shows(taken_over: bool, caps_on: bool) -> Option<bool> {
 }
 
 /// Delay for the lyric timer. A hostile lyrics file can put the next line days away,
-/// which must not wrap around to a short delay.
+/// which must not become a short delay: Windows runs any interval above
+/// USER_TIMER_MAXIMUM every 10 ms.
 fn lyric_timer_ms(ms: u64) -> u32 {
-    u32::try_from(ms).unwrap_or(u32::MAX).max(15)
+    const MAXIMUM: u64 = 0x7FFF_FFFF;
+    ms.clamp(15, MAXIMUM) as u32
 }
 
 /// The line to show at `position_ms`, and how long until the next one.
@@ -1077,9 +1079,18 @@ mod tests {
     }
 
     #[test]
-    fn lyric_timer_should_clamp_gaps_longer_than_u32() {
-        assert_eq!(lyric_timer_ms(u64::from(u32::MAX) + 1), u32::MAX);
-        assert_eq!(lyric_timer_ms(u64::MAX), u32::MAX);
+    fn lyric_timer_should_stay_within_what_windows_waits_for() {
+        // SetTimer turns anything above USER_TIMER_MAXIMUM into a 10 ms timer.
+        const MAXIMUM: u32 = 0x7FFF_FFFF;
+        assert_eq!(
+            [
+                lyric_timer_ms(u64::from(MAXIMUM)),
+                lyric_timer_ms(u64::from(MAXIMUM) + 1),
+                lyric_timer_ms(u64::from(u32::MAX) + 1),
+                lyric_timer_ms(u64::MAX),
+            ],
+            [MAXIMUM; 4]
+        );
     }
 }
 
