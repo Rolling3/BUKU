@@ -83,7 +83,7 @@ Changes apply at once; there is no Save button.
 | Accent colour | The colour of switches, the music bars and highlights: white (the default), yellow, orange, red, pink, purple, blue, cyan or green. |
 | Lyrics in the notch | Shows the current line inside the notch while music plays. |
 | Download lyrics | Looks lyrics up on lrclib.net. Off means BUKU makes no network requests at all. |
-| Show lyrics early by | How long before it is sung each line appears: 0 to 3 seconds. |
+| Show lyrics early by | How long before it is sung each line appears: 0 to 3 seconds, a tenth of a second at a time. |
 | Focus length, Break length | The two parts of the focus timer. |
 | Water reminders, Glasses a day | The hourly reminder and the daily goal. |
 | Browse app files | Opens the folder BUKU is installed in. |

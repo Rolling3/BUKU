@@ -154,6 +154,21 @@ const ROWS: [Row; 15] = [
     Row::Number(Number::WaterGoal, "Glasses a day"),
 ];
 
+/// `value` one step up or down, onto a multiple of the step: a value saved
+/// between steps (by an older step size, or by hand) lands on the nearest one
+/// in that direction.
+fn stepped(number: Number, value: u32, up: bool) -> u32 {
+    let (_, _, step) = number.range();
+    let below = value / step * step;
+    if up {
+        below.saturating_add(step)
+    } else if below < value {
+        below
+    } else {
+        value.saturating_sub(step)
+    }
+}
+
 impl Number {
     /// (smallest, largest, step)
     fn range(self) -> (u32, u32, u32) {
@@ -161,7 +176,7 @@ impl Number {
             Number::WaterGoal => (WATER_GOAL.0, WATER_GOAL.1, 1),
             Number::FocusMinutes => (FOCUS_MINUTES.0, FOCUS_MINUTES.1, 5),
             Number::BreakMinutes => (BREAK_MINUTES.0, BREAK_MINUTES.1, 1),
-            Number::LyricsEarly => (LYRICS_EARLY_MS.0, LYRICS_EARLY_MS.1, 250),
+            Number::LyricsEarly => (LYRICS_EARLY_MS.0, LYRICS_EARLY_MS.1, 100),
         }
     }
 
@@ -189,7 +204,8 @@ impl Number {
         match self {
             Number::WaterGoal => value.to_string(),
             Number::FocusMinutes | Number::BreakMinutes => format!("{value} min"),
-            // 1250 ms reads "1.25 s", 1000 ms "1 s".
+            // 1200 ms reads "1.2 s", 1000 ms "1 s"; 1250 ms, saved by an older
+            // step, still reads "1.25 s".
             Number::LyricsEarly => {
                 let seconds = format!("{}.{:02}", value / 1000, value % 1000 / 10);
                 format!("{} s", seconds.trim_end_matches('0').trim_end_matches('.'))
@@ -806,13 +822,8 @@ impl State {
                 self.save();
             }
             Item::Minus(number) | Item::Plus(number) => {
-                let (_, _, step) = number.range();
                 let value = number.get(&self.settings);
-                let value = if matches!(item, Item::Plus(_)) {
-                    value + step
-                } else {
-                    value.saturating_sub(step)
-                };
+                let value = stepped(number, value, matches!(item, Item::Plus(_)));
                 number.set(&mut self.settings, value);
                 self.save();
             }
@@ -1322,8 +1333,48 @@ mod tests {
     #[test]
     fn the_lyrics_lead_should_read_in_seconds() {
         assert_eq!(
-            [0, 250, 500, 1_000, 1_250, 3_000].map(|ms| Number::LyricsEarly.label(ms)),
-            ["0 s", "0.25 s", "0.5 s", "1 s", "1.25 s", "3 s"]
+            [0, 100, 300, 500, 1_000, 1_200, 1_250, 3_000].map(|ms| Number::LyricsEarly.label(ms)),
+            [
+                "0 s", "0.1 s", "0.3 s", "0.5 s", "1 s", "1.2 s", "1.25 s", "3 s"
+            ]
+        );
+    }
+
+    #[test]
+    fn the_lyrics_lead_should_move_a_tenth_of_a_second_at_a_time() {
+        let early = Number::LyricsEarly;
+        assert_eq!(
+            [
+                stepped(early, 0, true),
+                stepped(early, 100, true),
+                stepped(early, 1_000, true),
+                stepped(early, 1_000, false),
+                stepped(early, 100, false),
+                stepped(early, 0, false),
+            ],
+            [100, 200, 1_100, 900, 0, 0]
+        );
+    }
+
+    #[test]
+    fn a_lead_saved_off_the_grid_should_snap_onto_it() {
+        // 1.25 s was a step before the steps became a tenth of a second.
+        let early = Number::LyricsEarly;
+        assert_eq!(
+            [stepped(early, 1_250, true), stepped(early, 1_250, false)],
+            [1_300, 1_200]
+        );
+    }
+
+    #[test]
+    fn other_numbers_should_keep_their_steps() {
+        assert_eq!(
+            [
+                stepped(Number::FocusMinutes, 25, true),
+                stepped(Number::BreakMinutes, 5, false),
+                stepped(Number::WaterGoal, 8, true),
+            ],
+            [30, 4, 9]
         );
     }
 
