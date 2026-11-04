@@ -304,7 +304,9 @@ impl App {
                             .map(|path| {
                                 (
                                     shelf::display_name(path),
-                                    self.shelf_icons.get(path).and_then(Option::as_ref),
+                                    self.shelf_icons
+                                        .get(path)
+                                        .and_then(|(icon, _)| icon.as_ref()),
                                 )
                             })
                             .collect(),
@@ -383,13 +385,18 @@ impl App {
         let Some(gfx) = &self.gfx else { return };
         let items = self.shelf.items();
         self.shelf_icons.retain(|path, _| items.contains(path));
+        let now = Instant::now();
         for path in items.iter().take(SHELF_TILES) {
-            if self.shelf_icons.contains_key(path) {
+            let known = self
+                .shelf_icons
+                .get(path)
+                .map(|(icon, tried)| (icon.is_some(), now.duration_since(*tried)));
+            if !icon_lookup_due(known) {
                 continue;
             }
             let bitmap = dragdrop::file_icon(path)
                 .and_then(|(side, pixels)| gfx.create_bitmap(side, &pixels).ok());
-            self.shelf_icons.insert(path.clone(), bitmap);
+            self.shelf_icons.insert(path.clone(), (bitmap, now));
         }
     }
 
@@ -417,5 +424,36 @@ fn clock_strings() -> (String, String) {
         let decode =
             |buf: &[u16], len: i32| String::from_utf16_lossy(&buf[..(len.max(1) - 1) as usize]);
         (decode(&time, n), decode(&date, m))
+    }
+}
+
+/// How long a Shelf icon that couldn't be loaded waits before another try: its
+/// drive may be plugged in later, but a lookup on every frame would be wasted.
+const ICON_RETRY: Duration = Duration::from_secs(5);
+
+/// Whether to look up a Shelf file's icon, given whether it has one and how long
+/// ago it was tried (`None`: never).
+fn icon_lookup_due(known: Option<(bool, Duration)>) -> bool {
+    match known {
+        None => true,
+        Some((found, since)) => !found && since >= ICON_RETRY,
+    }
+}
+
+#[cfg(test)]
+mod shelf_icon_tests {
+    use super::*;
+
+    #[test]
+    fn an_icon_should_be_looked_up_once_found() {
+        assert!(icon_lookup_due(None));
+        assert!(!icon_lookup_due(Some((true, Duration::from_secs(600)))));
+    }
+
+    #[test]
+    fn a_failed_icon_should_be_tried_again_but_not_on_every_frame() {
+        // A file on a drive that wasn't plugged in yet.
+        assert!(!icon_lookup_due(Some((false, Duration::from_millis(16)))));
+        assert!(icon_lookup_due(Some((false, ICON_RETRY))));
     }
 }

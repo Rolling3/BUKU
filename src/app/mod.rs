@@ -256,9 +256,9 @@ struct App {
     drop_target: Option<IDropTarget>,
     /// Files are being dragged over the notch; keeps the Shelf open.
     drag_over: bool,
-    /// File icons on the current device, by path.
-    /// `None` marks an icon that couldn't be loaded, so it isn't retried every frame.
-    shelf_icons: HashMap<PathBuf, Option<ID2D1Bitmap1>>,
+    /// Shelf file icons on the current device, by path, with when each was looked
+    /// up: `None` marks one that couldn't be loaded, tried again after a while.
+    shelf_icons: HashMap<PathBuf, (Option<ID2D1Bitmap1>, Instant)>,
     /// The file behind the Shelf tile that was clicked, resolved at click time so a
     /// drop landing before `SHELF_OPEN` arrives can't shift the tile onto another file.
     shelf_open: Option<PathBuf>,
