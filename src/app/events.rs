@@ -2,6 +2,12 @@
 
 use super::*;
 
+/// Whether moving to `page` must close the task text box: it belongs to the
+/// Tasks page, and staying open under another page would add a task unseen.
+fn closes_task_input(input_open: bool, page: Page) -> bool {
+    input_open && page != Page::Tasks
+}
+
 /// Whether a Shelf file left after being dragged out. A drag that never ran (the
 /// file couldn't be reached) keeps it; a move takes it away; a drop that left a
 /// local file gone also does (Explorer reports some moves that way). A network
@@ -596,7 +602,7 @@ impl App {
         }
         match button {
             Some(Button::Tab(page)) => {
-                self.page = page;
+                self.show_page(page);
                 self.hot = None;
                 self.on_view_shown();
             }
@@ -812,10 +818,18 @@ impl App {
 
     // ----- Shelf -----
 
+    /// Switches the card to `page`, cancelling the task text box when it leaves Tasks.
+    fn show_page(&mut self, page: Page) {
+        if closes_task_input(self.input.is_some(), page) {
+            WindowHandle::new(self.hwnd).post(msg::INPUT_CLOSE, 0, 0);
+        }
+        self.page = page;
+    }
+
     pub(super) fn on_drag_over(&mut self, over: bool) {
         self.drag_over = over;
         if over {
-            self.page = Page::Shelf;
+            self.show_page(Page::Shelf);
         }
         self.retarget();
         if !self.animating {
@@ -827,7 +841,7 @@ impl App {
         let files: Vec<PathBuf> = self.dropped.borrow_mut().drain(..).collect();
         self.shelf.add(files);
         self.drag_over = false;
-        self.page = Page::Shelf;
+        self.show_page(Page::Shelf);
         // During the drag Windows sent no mouse messages, so check where the pointer
         // is now: the card stays open only if it's still over the notch.
         self.hover = self.pointer_over_window();
@@ -997,6 +1011,19 @@ impl App {
 mod tests {
     use super::*;
     use windows::Win32::System::Ole::{DROPEFFECT_COPY, DROPEFFECT_NONE};
+
+    #[test]
+    fn leaving_the_tasks_page_should_close_an_open_task_box() {
+        assert_eq!(
+            [
+                closes_task_input(true, Page::Water),
+                closes_task_input(true, Page::Shelf),
+                closes_task_input(true, Page::Tasks),
+                closes_task_input(false, Page::Water),
+            ],
+            [true, true, false, false]
+        );
+    }
 
     #[test]
     fn a_drag_that_never_happened_should_keep_the_shelf_item() {
