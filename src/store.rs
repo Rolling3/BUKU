@@ -38,12 +38,44 @@ fn read_capped(path: &Path) -> Option<Vec<u8>> {
     (bytes.len() as u64 <= MAX_FILE_BYTES).then_some(bytes)
 }
 
+/// What reading a file gave.
+#[derive(Debug)]
+pub enum Loaded<T> {
+    /// No such file yet.
+    Missing,
+    Read(T),
+    /// The file is there but couldn't be read or parsed; a copy is kept aside.
+    Unusable,
+}
+
+/// Reads `name`, telling a missing file apart from one that can't be used.
+pub fn load_checked<T: DeserializeOwned>(name: &str) -> Loaded<T> {
+    dir().map_or(Loaded::Missing, |dir| load_from(&dir.join(name)))
+}
+
 /// Reads `name`, or the default when it's missing or unreadable.
 pub fn load<T: DeserializeOwned + Default>(name: &str) -> T {
-    dir()
-        .and_then(|dir| read_capped(&dir.join(name)))
-        .and_then(|bytes| parse(&bytes))
-        .unwrap_or_default()
+    match load_checked(name) {
+        Loaded::Read(value) => value,
+        Loaded::Missing | Loaded::Unusable => T::default(),
+    }
+}
+
+fn load_from<T: DeserializeOwned>(path: &Path) -> Loaded<T> {
+    match std::fs::metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Loaded::Missing,
+        _ => {}
+    }
+    match read_capped(path).and_then(|bytes| parse(&bytes)) {
+        Some(value) => Loaded::Read(value),
+        None => {
+            // The next save would overwrite it: keep the user's file as `<name>.bad`.
+            let mut aside = path.as_os_str().to_owned();
+            aside.push(".bad");
+            let _ = std::fs::copy(path, PathBuf::from(aside));
+            Loaded::Unusable
+        }
+    }
 }
 
 /// Parses JSON, accepting the byte-order mark that editors such as Notepad (and
@@ -94,6 +126,50 @@ mod tests {
         let read = (read_capped(&small), read_capped(&big));
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(read, (Some(b"[1]".to_vec()), None));
+    }
+}
+
+#[cfg(test)]
+mod unreadable_file_tests {
+    use super::*;
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("buku-store-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    }
+
+    #[test]
+    fn a_file_that_cannot_be_read_should_be_kept_aside() {
+        let dir = temp_dir("bad");
+        let file = dir.join("settings.json");
+        let _ = std::fs::write(&file, b"{\"fetch_lyrics\": false,");
+        let loaded: Loaded<Vec<u32>> = load_from(&file);
+        let kept = std::fs::read(dir.join("settings.json.bad")).ok();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(matches!(loaded, Loaded::Unusable));
+        assert_eq!(kept.as_deref(), Some(&b"{\"fetch_lyrics\": false,"[..]));
+    }
+
+    #[test]
+    fn a_missing_file_should_be_told_apart_and_leave_nothing_behind() {
+        let dir = temp_dir("missing");
+        let loaded: Loaded<Vec<u32>> = load_from(&dir.join("tasks.json"));
+        let left = std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(matches!(loaded, Loaded::Missing));
+        assert_eq!(left, 0);
+    }
+
+    #[test]
+    fn a_good_file_should_be_read() {
+        let dir = temp_dir("good");
+        let file = dir.join("water.json");
+        let _ = std::fs::write(&file, b"[1, 2]");
+        let loaded: Loaded<Vec<u32>> = load_from(&file);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(matches!(loaded, Loaded::Read(ref v) if v == &[1, 2]));
     }
 }
 

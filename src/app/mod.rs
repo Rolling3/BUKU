@@ -897,7 +897,8 @@ impl App {
 
     /// Applies what the Settings window saved.
     fn reload_settings(&mut self) {
-        let old = std::mem::replace(&mut self.settings, Settings::load());
+        let reloaded = Settings::reload(&self.settings);
+        let old = std::mem::replace(&mut self.settings, reloaded);
         let new = &self.settings;
         self.fetch_lyrics.store(new.fetch_lyrics, Ordering::Relaxed);
         if new.fetch_lyrics && !old.fetch_lyrics {

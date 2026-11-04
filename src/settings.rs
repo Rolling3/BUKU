@@ -5,7 +5,7 @@ use serde_json::Value;
 
 use crate::accent::Accent;
 use crate::capslock::{self, CapsMode};
-use crate::store;
+use crate::store::{self, Loaded};
 
 const FILE: &str = "settings.json";
 
@@ -116,9 +116,29 @@ fn whole_number(value: Option<&Value>) -> Option<u32> {
 }
 
 impl Settings {
-    /// Loads the settings, pulling hand-edited numbers back into a sane range.
+    /// Loads the settings at start, pulling hand-edited numbers back into a sane range.
     pub fn load() -> Self {
-        let mut settings: Self = store::load(FILE);
+        Self::from_loaded(store::load_checked(FILE), None)
+    }
+
+    /// Loads the settings again while `in_use` are applied: a file that can't be
+    /// read right now (held by another program, or damaged) changes nothing.
+    pub fn reload(in_use: &Settings) -> Self {
+        Self::from_loaded(store::load_checked(FILE), Some(in_use))
+    }
+
+    fn from_loaded(loaded: Loaded<Settings>, in_use: Option<&Settings>) -> Self {
+        let mut settings = match (loaded, in_use) {
+            (Loaded::Read(settings), _) => settings,
+            (Loaded::Missing, _) => Self::default(),
+            (Loaded::Unusable, Some(in_use)) => in_use.clone(),
+            // The file may have had lyrics turned off; stay offline until Settings
+            // saves a readable file again.
+            (Loaded::Unusable, None) => Self {
+                fetch_lyrics: false,
+                ..Self::default()
+            },
+        };
         settings.water_goal = settings.water_goal.clamp(WATER_GOAL.0, WATER_GOAL.1);
         settings.focus_minutes = settings
             .focus_minutes
@@ -134,6 +154,44 @@ impl Settings {
 
     pub fn save(&self) -> std::io::Result<()> {
         store::save(FILE, self)
+    }
+}
+
+#[cfg(test)]
+mod unreadable_file_tests {
+    use super::*;
+
+    #[test]
+    fn an_unreadable_file_at_start_should_keep_lyrics_offline() {
+        let settings = Settings::from_loaded(Loaded::Unusable, None);
+        assert!(!settings.fetch_lyrics);
+    }
+
+    #[test]
+    fn a_missing_file_should_give_the_defaults() {
+        let settings = Settings::from_loaded(Loaded::Missing, None);
+        assert!(settings.fetch_lyrics && settings.lyrics_in_notch);
+    }
+
+    #[test]
+    fn an_unreadable_file_while_running_should_keep_the_settings_in_use() {
+        let in_use = Settings {
+            fetch_lyrics: false,
+            focus_minutes: 50,
+            ..Settings::default()
+        };
+        let settings = Settings::from_loaded(Loaded::Unusable, Some(&in_use));
+        assert_eq!((settings.fetch_lyrics, settings.focus_minutes), (false, 50));
+    }
+
+    #[test]
+    fn a_read_file_should_still_be_clamped() {
+        let read = Settings {
+            focus_minutes: 100_000,
+            ..Settings::default()
+        };
+        let settings = Settings::from_loaded(Loaded::Read(read), None);
+        assert_eq!(settings.focus_minutes, FOCUS_MINUTES.1);
     }
 }
 
