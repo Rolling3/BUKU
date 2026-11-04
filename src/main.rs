@@ -26,6 +26,7 @@ mod system;
 mod tasks;
 mod tray;
 mod water;
+mod web_cache;
 
 use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError};
 use windows::Win32::System::Ole::OleInitialize;

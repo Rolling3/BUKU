@@ -85,6 +85,7 @@ Changes apply at once; there is no Save button.
 | Focus length, Break length | The two parts of the focus timer. |
 | Water reminders, Glasses a day | The hourly reminder and the daily goal. |
 | Browse app files | Opens the folder BUKU is installed in. |
+| Clear cache | Removes lyrics lookups that earlier versions of BUKU left in the Windows web cache, and says how many it removed. Nothing else in the cache is touched. |
 
 **Custom Caps Lock key**: choose **Custom** with the arrows and recording starts.
 Press the key you want (for example Esc or F13), or hold modifiers and press a

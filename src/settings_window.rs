@@ -7,6 +7,7 @@
 
 use std::cell::Cell;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
@@ -47,6 +48,7 @@ use crate::display;
 use crate::gfx::{Gfx, rgba};
 use crate::msg::{self, WindowHandle};
 use crate::settings::{BREAK_MINUTES, FOCUS_MINUTES, LYRICS_EARLY_MS, Settings, WATER_GOAL};
+use crate::web_cache;
 
 const CLASS: PCWSTR = w!("BUKU.Settings");
 /// Not exported by the Win32 bindings alongside the other mouse messages.
@@ -98,6 +100,8 @@ enum Item {
     /// Previous or next accent colour.
     AccentStep(bool),
     AppFolder,
+    /// Removes lyrics lookups earlier versions left in the Windows web cache.
+    ClearCache,
 }
 
 enum Row {
@@ -208,12 +212,18 @@ fn row_tops() -> impl Iterator<Item = (f32, &'static Row)> {
 }
 
 const APP_BUTTON: (f32, f32, f32, f32) = (PAD, HEIGHT - 58.0, 150.0, 32.0);
+/// Right of "Browse app files"; what it cleared shows at the window's right edge.
+const CACHE_BUTTON: (f32, f32, f32, f32) = (PAD + 160.0, HEIGHT - 58.0, 112.0, 32.0);
 
 /// The control under (`x`, `y`), in DIPs.
 fn item_at(x: f32, y: f32) -> Option<Item> {
     let (bx, by, bw, bh) = APP_BUTTON;
     if x >= bx && x <= bx + bw && y >= by && y <= by + bh {
         return Some(Item::AppFolder);
+    }
+    let (bx, by, bw, bh) = CACHE_BUTTON;
+    if x >= bx && x <= bx + bw && y >= by && y <= by + bh {
+        return Some(Item::ClearCache);
     }
     for (top, row) in row_tops() {
         if y < top || y > top + ROW_H {
@@ -386,6 +396,27 @@ struct State {
     view_h: f32,
     /// How far the content is scrolled, in DIPs.
     scroll: f32,
+    /// What the last cache clear removed, shown in place of the version.
+    cache_note: Option<String>,
+}
+
+/// A cache clear is running. Kept outside the window, which can close and
+/// open again while it runs, so a second clear can't start.
+static CLEARING: AtomicBool = AtomicBool::new(false);
+/// The open Settings window, for a clear that finishes on another thread.
+static OPEN_WINDOW: AtomicIsize = AtomicIsize::new(0);
+
+/// Ends the in-flight clear when dropped, even if clearing panics.
+struct ClearingDone;
+
+impl Drop for ClearingDone {
+    fn drop(&mut self) {
+        CLEARING.store(false, Ordering::Release);
+    }
+}
+
+fn clearing() -> bool {
+    CLEARING.load(Ordering::Acquire)
 }
 
 thread_local! {
@@ -449,6 +480,7 @@ pub fn open(notch: HWND) {
             gfx_tried: None,
             view_h: HEIGHT,
             scroll: 0.0,
+            cache_note: None,
         });
         let raw = Box::into_raw(state);
         PENDING.set(raw);
@@ -476,6 +508,7 @@ pub fn open(notch: HWND) {
             return;
         };
         OPEN.set(hwnd.0 as isize);
+        OPEN_WINDOW.store(hwnd.0 as isize, Ordering::Release);
         let dark = BOOL(1);
         let _ = DwmSetWindowAttribute(
             hwnd,
@@ -621,6 +654,7 @@ unsafe extern "system" fn window_proc(
                 drop(Box::from_raw(state));
             }
             OPEN.set(0);
+            OPEN_WINDOW.store(0, Ordering::Release);
             return LRESULT(0);
         }
         // Handled before borrowing the state: destroying the window frees it. While
@@ -667,6 +701,12 @@ unsafe extern "system" fn window_proc(
             }
             WM_DISPLAYCHANGE => {
                 state.screens = display::screens();
+                state.render();
+                LRESULT(0)
+            }
+            msg::CACHE_CLEARED => {
+                let cleared = web_cache::from_message(wparam.0, lparam.0);
+                state.cache_note = Some(web_cache::describe(&cleared));
                 state.render();
                 LRESULT(0)
             }
@@ -793,6 +833,24 @@ impl State {
                     }
                     _ => None,
                 };
+            }
+            Item::ClearCache => {
+                let start =
+                    CLEARING.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire);
+                if start.is_ok() {
+                    self.cache_note = None;
+                    std::thread::spawn(|| {
+                        let done = ClearingDone;
+                        let (wparam, lparam) =
+                            web_cache::to_message(&web_cache::clear_lyrics_lookups());
+                        drop(done);
+                        // The window that is open now, which may not be the one clicked.
+                        let open = OPEN_WINDOW.load(Ordering::Acquire);
+                        if open != 0 {
+                            WindowHandle(open).post(msg::CACHE_CLEARED, wparam, lparam);
+                        }
+                    });
+                }
             }
             Item::AppFolder => {
                 // The shell can show UI and pump messages while it opens a folder, which
@@ -1096,15 +1154,41 @@ impl State {
             TEXT,
             DWRITE_TEXT_ALIGNMENT_CENTER,
         );
-        let version = concat!("BUKU ", env!("CARGO_PKG_VERSION"));
+        let (cx, cy, cw, ch) = CACHE_BUTTON;
+        let fill = if self.hot == Some(Item::ClearCache) && !clearing() {
+            rgba(1.0, 1.0, 1.0, 0.18)
+        } else {
+            HOT
+        };
+        p.rect(cx, cy, cw, ch, ch / 2.0, fill);
         p.text(
-            version,
+            if clearing() {
+                "Clearing..."
+            } else {
+                "Clear cache"
+            },
             &gfx.fonts.small,
-            WIDTH - PAD - 120.0,
-            by,
-            120.0,
-            bh,
-            TEXT_DIM,
+            cx,
+            cy,
+            cw,
+            ch,
+            if clearing() { TEXT_DIM } else { TEXT },
+            DWRITE_TEXT_ALIGNMENT_CENTER,
+        );
+        let version = concat!("BUKU ", env!("CARGO_PKG_VERSION"));
+        let (note, color) = match &self.cache_note {
+            Some(note) => (note.as_str(), TEXT),
+            None => (version, TEXT_DIM),
+        };
+        let note_x = cx + cw + 8.0;
+        p.text(
+            note,
+            &gfx.fonts.small,
+            note_x,
+            by - 6.0,
+            WIDTH - PAD - note_x,
+            bh + 12.0,
+            color,
             windows::Win32::Graphics::DirectWrite::DWRITE_TEXT_ALIGNMENT_TRAILING,
         );
 
@@ -1299,6 +1383,20 @@ mod tests {
     fn item_at_should_find_the_app_folder_button() {
         let (x, y, w, h) = APP_BUTTON;
         assert_eq!(item_at(x + w / 2.0, y + h / 2.0), Some(Item::AppFolder));
+    }
+
+    #[test]
+    fn the_clear_cache_button_should_sit_right_of_browse_app_files() {
+        let (ax, _, aw, _) = APP_BUTTON;
+        let (x, y, w, h) = CACHE_BUTTON;
+        assert!(x > ax + aw && x + w < WIDTH - PAD);
+        assert_eq!(
+            [
+                item_at(x + w / 2.0, y + h / 2.0),
+                item_at(ax + aw + 4.0, y + h / 2.0)
+            ],
+            [Some(Item::ClearCache), None]
+        );
     }
 }
 

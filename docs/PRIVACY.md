@@ -15,7 +15,10 @@ request carries the header `User-Agent: BUKU/<version>`.
 
 Lyrics are cached in memory for the session only. The lookup keeps nothing on
 disk: it bypasses Windows' web cache, sends and stores no cookies, and follows
-no redirects. Turn off
+no redirects. Versions before this stored each lookup in that cache;
+**Clear cache** in Settings removes those `lrclib.net` entries and nothing else.
+Windows can keep traces in the cache database's own log files until it
+replaces them. Turn off
 **Download lyrics (lrclib.net)** in the menu and BUKU makes no network
 requests at all.
 

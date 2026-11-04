@@ -48,6 +48,9 @@ pub const SETTINGS_RELOAD: u32 = WM_APP + 21;
 /// Take the scale of the screen the notch is on and center it there again,
 /// once the move (or the window's creation) is over.
 pub const SETTLE: u32 = WM_APP + 22;
+/// To the Settings window: clearing cached lyrics lookups finished; the result
+/// is packed by `web_cache::to_message`.
+pub const CACHE_CLEARED: u32 = WM_APP + 23;
 
 /// An `HWND` that can cross threads. Posting to a window from any thread is allowed.
 #[derive(Clone, Copy)]
