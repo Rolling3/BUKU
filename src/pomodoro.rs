@@ -37,10 +37,16 @@ impl Pomodoro {
     }
 
     /// New lengths from Settings. A running phase keeps its end time; a paused or
-    /// stopped one starts over at the new length.
+    /// stopped one starts over at the new length. Settings saves on every change,
+    /// so lengths that didn't change leave a paused session where it was.
     pub fn set_lengths(&mut self, focus_minutes: u32, break_minutes: u32) {
-        self.focus = Duration::from_secs(u64::from(focus_minutes) * 60);
-        self.rest = Duration::from_secs(u64::from(break_minutes) * 60);
+        let focus = Duration::from_secs(u64::from(focus_minutes) * 60);
+        let rest = Duration::from_secs(u64::from(break_minutes) * 60);
+        if (focus, rest) == (self.focus, self.rest) {
+            return;
+        }
+        self.focus = focus;
+        self.rest = rest;
         if self.ends_at.is_none() {
             self.left = self.length();
         }
@@ -135,6 +141,27 @@ mod tests {
             timer.remaining(start + Duration::from_secs(600)),
             Duration::from_secs(24 * 60)
         );
+    }
+
+    #[test]
+    fn unchanged_lengths_should_keep_a_paused_session() {
+        let start = Instant::now();
+        let mut timer = Pomodoro::new(25, 5);
+        timer.toggle(start);
+        timer.toggle(start + Duration::from_secs(15 * 60));
+        // Another setting was saved; the lengths are what they were.
+        timer.set_lengths(25, 5);
+        assert_eq!(timer.remaining(start), Duration::from_secs(10 * 60));
+    }
+
+    #[test]
+    fn a_new_length_should_restart_a_paused_session() {
+        let start = Instant::now();
+        let mut timer = Pomodoro::new(25, 5);
+        timer.toggle(start);
+        timer.toggle(start + Duration::from_secs(15 * 60));
+        timer.set_lengths(30, 5);
+        assert_eq!(timer.remaining(start), Duration::from_secs(30 * 60));
     }
 
     #[test]
