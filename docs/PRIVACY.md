@@ -19,7 +19,7 @@ no redirects. Versions before this stored each lookup in that cache;
 **Clear cache** in Settings removes those `lrclib.net` entries and nothing else.
 Windows can keep traces in the cache database's own log files until it
 replaces them. Turn off
-**Download lyrics (lrclib.net)** in the menu and BUKU makes no network
+**Download lyrics** in Settings and BUKU makes no network
 requests at all.
 
 ## Keyboard
