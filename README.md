@@ -130,4 +130,5 @@ keyboard hook, and it changes Caps Lock alone. The details are in
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). The licenses of the Rust crates BUKU is built from
+are in [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).
