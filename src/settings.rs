@@ -58,7 +58,7 @@ impl Default for Settings {
             caps_custom: Vec::new(),
             screen: String::new(),
             show_over_fullscreen: false,
-            accent: Accent::Yellow,
+            accent: Accent::White,
         }
     }
 }

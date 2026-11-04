@@ -11,7 +11,6 @@ use crate::gfx::rgba;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Accent {
-    #[default]
     Yellow,
     Orange,
     Red,
@@ -20,6 +19,7 @@ pub enum Accent {
     Blue,
     Cyan,
     Green,
+    #[default]
     White,
 }
 
@@ -78,11 +78,17 @@ impl Accent {
 
 /// The accent in use. The notch and the Settings window draw on the same
 /// thread, so they always agree.
-static CURRENT: AtomicU8 = AtomicU8::new(0);
+static CURRENT: AtomicU8 = AtomicU8::new(DEFAULT_INDEX);
+
+/// White's place in `Accent::ALL`, the colour drawn before settings are read.
+const DEFAULT_INDEX: u8 = 8;
 
 pub fn set_current(accent: Accent) {
-    let index = Accent::ALL.iter().position(|&a| a == accent).unwrap_or(0);
-    CURRENT.store(index as u8, Ordering::Relaxed);
+    let index = Accent::ALL
+        .iter()
+        .position(|&a| a == accent)
+        .map_or(DEFAULT_INDEX, |index| index as u8);
+    CURRENT.store(index, Ordering::Relaxed);
 }
 
 /// The colour of the accent in use.
@@ -126,6 +132,14 @@ mod tests {
         let yellow = Accent::Yellow.color();
         assert!(unique);
         assert_eq!((yellow.r, yellow.g, yellow.b), (1.0, 0.70, 0.28));
+    }
+
+    #[test]
+    fn white_should_be_the_default_from_the_first_frame() {
+        let white = Accent::White.color();
+        let first = Accent::ALL[DEFAULT_INDEX as usize];
+        assert_eq!((Accent::default(), first), (Accent::White, Accent::White));
+        assert_eq!((white.r, white.g, white.b), (0.94, 0.94, 0.94));
     }
 
     #[test]
