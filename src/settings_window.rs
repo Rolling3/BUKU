@@ -33,8 +33,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowLongPtrW, GetWindowRect, IDC_ARROW, IsIconic, LoadCursorW, RegisterClassExW,
     SW_RESTORE, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOZORDER, SetForegroundWindow,
     SetWindowLongPtrW, SetWindowPos, ShowWindow, WA_INACTIVE, WINDOW_EX_STYLE, WM_ACTIVATE,
-    WM_CHAR, WM_CLOSE, WM_CREATE, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_KEYDOWN, WM_KEYUP,
-    WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_SYSCHAR,
+    WM_CHAR, WM_CLOSE, WM_CREATE, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_EXITSIZEMOVE, WM_KEYDOWN,
+    WM_KEYUP, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_SYSCHAR,
     WM_SYSKEYDOWN, WM_SYSKEYUP, WNDCLASSEXW, WS_CAPTION, WS_EX_NOREDIRECTIONBITMAP, WS_MINIMIZEBOX,
     WS_OVERLAPPED, WS_SYSMENU,
 };
@@ -699,10 +699,21 @@ unsafe extern "system" fn window_proc(
                 state.render();
                 DefWindowProcW(hwnd, message, wparam, lparam)
             }
-            WM_DISPLAYCHANGE => {
-                state.screens = display::screens();
-                state.render();
-                LRESULT(0)
+            // A new resolution, or a move to a screen of another height at the same
+            // scale (no WM_DPICHANGED then): fit the window to its screen again.
+            WM_DISPLAYCHANGE | WM_EXITSIZEMOVE => {
+                if message == WM_DISPLAYCHANGE {
+                    state.screens = display::screens();
+                }
+                fit_to_dpi(hwnd, GetDpiForWindow(hwnd), None);
+                if let Some(state) = state_of(hwnd) {
+                    state.render();
+                }
+                if message == WM_DISPLAYCHANGE {
+                    LRESULT(0)
+                } else {
+                    DefWindowProcW(hwnd, message, wparam, lparam)
+                }
             }
             msg::CACHE_CLEARED => {
                 let cleared = web_cache::from_message(wparam.0, lparam.0);
