@@ -66,3 +66,23 @@ fn main() {
         app::fatal(&format!("BUKU could not start.\n\n{err}"));
     }
 }
+
+#[cfg(test)]
+mod version_tests {
+    /// The version is written in three places besides Cargo.toml; a release with
+    /// one of them left behind would show two different versions.
+    #[test]
+    fn the_installer_and_the_manifest_should_carry_the_crate_version() {
+        let version = env!("CARGO_PKG_VERSION");
+        let installer = include_str!("../installer/buku.iss");
+        let manifest = include_str!("../buku.manifest");
+        assert!(
+            installer.contains(&format!("#define AppVersion \"{version}\"")),
+            "installer/buku.iss has another AppVersion than {version}"
+        );
+        assert!(
+            manifest.contains(&format!("version=\"{version}.0\"")),
+            "buku.manifest has another version than {version}.0"
+        );
+    }
+}
