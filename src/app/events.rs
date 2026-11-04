@@ -2,6 +2,13 @@
 
 use super::*;
 
+/// What the Caps Lock indicator should show after a press: the flipped state, or
+/// nothing while the key is remapped, since the hook swallows it and Caps Lock
+/// never toggles.
+fn caps_press_shows(taken_over: bool, caps_on: bool) -> Option<bool> {
+    (!taken_over).then_some(!caps_on)
+}
+
 /// Delay for the lyric timer. A hostile lyrics file can put the next line days away,
 /// which must not wrap around to a short delay.
 fn lyric_timer_ms(ms: u64) -> u32 {
@@ -467,8 +474,10 @@ impl App {
         } else if !self.caps_down {
             // Holding the key auto-repeats key-down; Caps Lock only toggles on the first.
             self.caps_down = true;
-            self.caps_on = !self.caps_on;
-            self.show_hud(Hud::CapsLock(self.caps_on));
+            if let Some(on) = caps_press_shows(capslock::is_taken_over(), self.caps_on) {
+                self.caps_on = on;
+                self.show_hud(Hud::CapsLock(on));
+            }
         }
     }
 
@@ -973,6 +982,19 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_caps_press_should_flip_the_indicator_only_when_caps_lock_is_itself() {
+        assert_eq!(
+            [
+                caps_press_shows(false, false),
+                caps_press_shows(false, true),
+                caps_press_shows(true, false),
+                caps_press_shows(true, true),
+            ],
+            [Some(true), Some(false), None, None]
+        );
+    }
 
     #[test]
     fn lyric_timer_should_keep_short_gaps_and_floor_at_15_ms() {

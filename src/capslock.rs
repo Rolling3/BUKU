@@ -222,6 +222,11 @@ fn unpack(word: u64) -> Vec<u16> {
         .collect()
 }
 
+/// Caps Lock is remapped right now: the hook swallows it and it never toggles.
+pub fn is_taken_over() -> bool {
+    CapsMode::from_u8(MODE.load(Ordering::Relaxed)) != CapsMode::Normal
+}
+
 // The hook procedure is a plain function, so it reads its state from statics.
 static MODE: AtomicU8 = AtomicU8::new(0);
 static CUSTOM: AtomicU64 = AtomicU64::new(0);

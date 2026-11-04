@@ -63,7 +63,7 @@ use crate::accent;
 use crate::anim::{Fade, Spring};
 use crate::app_volume::{APP_VOLUME_GONE, AppVolume};
 use crate::audio::{Audio, VOLUME_MUTED, VOLUME_OWN, volume_generation};
-use crate::capslock::CapsHook;
+use crate::capslock::{self, CapsHook};
 use crate::display;
 use crate::dragdrop::{self, DropTarget, Dropped};
 use crate::draw::{
@@ -914,6 +914,10 @@ impl App {
         {
             self.caps_hook
                 .apply(self.settings.caps_lock, &self.settings.caps_custom);
+            // Taking the key over turns Caps Lock off; handing it back leaves it as
+            // it is. Either way, read it again rather than trust the old flag.
+            self.caps_on =
+                !capslock::is_taken_over() && unsafe { GetKeyState(VK_CAPITAL.0 as i32) } & 1 != 0;
         }
         if self.settings.screen != old.screen {
             self.move_to_screen();
