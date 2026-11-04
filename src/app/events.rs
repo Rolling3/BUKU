@@ -2,6 +2,18 @@
 
 use super::*;
 
+/// Whether a Shelf file left after being dragged out. A drag that never ran (the
+/// file couldn't be reached) keeps it; a move takes it away; a drop that left a
+/// local file gone also does (Explorer reports some moves that way). A network
+/// path isn't looked up, as that can hang on an unreachable share.
+fn gone_after_drag(effect: Option<DROPEFFECT>, local: bool, exists: impl FnOnce() -> bool) -> bool {
+    match effect {
+        None => false,
+        Some(effect) if effect.0 & DROPEFFECT_MOVE.0 != 0 => true,
+        Some(_) => local && !exists(),
+    }
+}
+
 /// What the Caps Lock indicator should show after a press: the flipped state, or
 /// nothing while the key is remapped, since the hook swallows it and Caps Lock
 /// never toggles.
@@ -827,8 +839,8 @@ impl App {
     }
 
     pub(super) fn after_drag_out(&mut self, path: &Path, effect: Option<DROPEFFECT>) {
-        // A move took the file away from where the shelf points.
-        if effect.is_some_and(|effect| effect.0 & DROPEFFECT_MOVE.0 != 0) || !path.exists() {
+        let local = crate::shelf::is_local(path);
+        if gone_after_drag(effect, local, || path.exists()) {
             self.shelf.remove(path);
         }
         self.hover = self.pointer_over_window();
@@ -984,6 +996,37 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use windows::Win32::System::Ole::{DROPEFFECT_COPY, DROPEFFECT_NONE};
+
+    #[test]
+    fn a_drag_that_never_happened_should_keep_the_shelf_item() {
+        // An offline drive: the drag couldn't start, and the file can't be seen.
+        assert!(!gone_after_drag(None, true, || false));
+        assert!(!gone_after_drag(None, false, || false));
+    }
+
+    #[test]
+    fn a_moved_file_should_leave_the_shelf() {
+        assert!(gone_after_drag(Some(DROPEFFECT_MOVE), true, || true));
+        assert!(gone_after_drag(Some(DROPEFFECT_MOVE), false, || true));
+    }
+
+    #[test]
+    fn a_dropped_local_file_that_is_gone_should_leave_the_shelf() {
+        // Explorer reports some moves as a plain drop.
+        assert!(gone_after_drag(Some(DROPEFFECT_NONE), true, || false));
+        assert!(!gone_after_drag(Some(DROPEFFECT_COPY), true, || true));
+    }
+
+    #[test]
+    fn a_network_file_should_not_be_looked_up_after_a_copy() {
+        let looked = std::cell::Cell::new(false);
+        let gone = gone_after_drag(Some(DROPEFFECT_COPY), false, || {
+            looked.set(true);
+            false
+        });
+        assert_eq!((gone, looked.get()), (false, false));
+    }
 
     #[test]
     fn a_caps_press_should_flip_the_indicator_only_when_caps_lock_is_itself() {
