@@ -376,8 +376,25 @@ impl Painter<'_> {
     }
 
     /// Draws album art scaled into a `size` square with rounded corners.
+    /// The cover is decoded larger than any place it's drawn, so it's filtered
+    /// down with the high-quality cubic filter: the default bilinear one skips
+    /// source pixels at these ratios and leaves the 18 DIP thumbnail jagged.
     fn image(&self, bitmap: &ID2D1Bitmap1, x: f32, y: f32, size: f32, radius: f32) {
-        let Ok(brush) = (unsafe { self.gfx.ctx.CreateBitmapBrush(bitmap, None, None) }) else {
+        use windows::Win32::Graphics::Direct2D::{
+            D2D1_BITMAP_BRUSH_PROPERTIES1, D2D1_EXTEND_MODE_CLAMP,
+            D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
+        };
+        let properties = D2D1_BITMAP_BRUSH_PROPERTIES1 {
+            extendModeX: D2D1_EXTEND_MODE_CLAMP,
+            extendModeY: D2D1_EXTEND_MODE_CLAMP,
+            interpolationMode: D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
+        };
+        let brush = unsafe {
+            self.gfx
+                .ctx
+                .CreateBitmapBrush(bitmap, Some(&properties), None)
+        };
+        let Ok(brush) = brush else {
             return;
         };
         let scale = size / ART_PX as f32;
