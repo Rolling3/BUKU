@@ -6,7 +6,7 @@
 //! thread (so drawing never delays typing). It acts on Caps Lock alone; every
 //! other key is passed on untouched at once, and nothing is recorded.
 
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -232,6 +232,19 @@ static MODE: AtomicU8 = AtomicU8::new(0);
 static CUSTOM: AtomicU64 = AtomicU64::new(0);
 /// Caps Lock is held; its auto-repeat must not send a shortcut again.
 static HELD: AtomicBool = AtomicBool::new(false);
+/// When Caps Lock last went down (the event's tick count, in ms).
+static LAST_DOWN: AtomicU32 = AtomicU32::new(0);
+
+/// Auto-repeat sends key-downs at most the longest repeat delay (one second)
+/// apart; a key-down later than this follows a release the hook never saw.
+const STALE_HOLD_MS: u32 = 1_500;
+
+/// Whether a Caps Lock key-down starts a press rather than repeating a held key.
+/// The release can go missing (it went to the lock screen or an elevated window),
+/// and the next press must not be taken for a repeat.
+fn is_new_press(held: bool, since_last_down_ms: u32) -> bool {
+    !held || since_last_down_ms > STALE_HOLD_MS
+}
 /// The key BUKU is holding down for a one-key custom mapping (0 when none), so it
 /// can be released if the hook stops or the mapping changes before Caps Lock
 /// comes up.
@@ -444,7 +457,14 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
             && event.dwExtraInfo != BUKU_KEY
         {
             let down = matches!(wparam.0 as u32, WM_KEYDOWN | WM_SYSKEYDOWN);
-            let first_down = down && !HELD.swap(true, Ordering::Relaxed);
+            let since = if down {
+                event
+                    .time
+                    .wrapping_sub(LAST_DOWN.swap(event.time, Ordering::Relaxed))
+            } else {
+                0
+            };
+            let first_down = down && is_new_press(HELD.swap(true, Ordering::Relaxed), since);
             if !down {
                 HELD.store(false, Ordering::Relaxed);
             }
@@ -491,6 +511,23 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_press_after_a_lost_release_should_count_as_a_new_press() {
+        assert_eq!(
+            [
+                is_new_press(false, 0),
+                // Auto-repeat while held: at most the longest repeat delay apart.
+                is_new_press(true, 30),
+                is_new_press(true, 1_000),
+                // The release went to another desktop; this is a new press.
+                is_new_press(true, 5_000),
+                // The tick count wrapped between the two presses.
+                is_new_press(true, 2u32.wrapping_sub(u32::MAX - 10)),
+            ],
+            [true, false, false, true, false]
+        );
+    }
 
     const A: u16 = 0x41;
     const ESC: u16 = 0x1B;
