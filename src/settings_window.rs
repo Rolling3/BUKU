@@ -100,7 +100,7 @@ enum Item {
     /// Previous or next accent colour.
     AccentStep(bool),
     AppFolder,
-    /// Removes lyrics lookups earlier versions left in the Windows web cache.
+    /// Removes any lyrics lookups kept in the Windows web cache.
     ClearCache,
 }
 

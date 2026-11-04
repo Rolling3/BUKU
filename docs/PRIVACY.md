@@ -15,10 +15,9 @@ request carries the header `User-Agent: BUKU/<version>`.
 
 Lyrics are cached in memory for the session only. The lookup keeps nothing on
 disk: it bypasses Windows' web cache, sends and stores no cookies, and follows
-no redirects. Versions before this stored each lookup in that cache;
-**Clear cache** in Settings removes those `lrclib.net` entries and nothing else.
-Windows can keep traces in the cache database's own log files until it
-replaces them. Turn off
+no redirects. **Clear cache** in Settings removes any `lrclib.net` entries
+that are in that cache all the same, and nothing else. Windows can keep traces
+in the cache database's own log files until it replaces them. Turn off
 **Download lyrics** in Settings and BUKU makes no network
 requests at all.
 
@@ -55,8 +54,16 @@ Normal removes the hook.
 - Lyric timings you set on the media card are stored in
   `%APPDATA%\BUKU\lyric_sync.json` as a hash of each song's title, artist and length
   with its offset, never the song's name, and never leave your computer.
+- A file BUKU can't read is copied aside as `<file>.bad` in the same folder,
+  so the next save doesn't overwrite it, and each save goes through a
+  short-lived `<file>.tmp`. Uninstalling asks whether to delete the folder; a
+  silent uninstall leaves it.
 - Battery level, power source, the network name and the sound output's name are
   read from Windows when they change and only drawn on screen.
 - "Start with Windows" adds a `BUKU` value under
   `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run`, only when
-  you turn it on, and removes it when you turn it off.
+  you turn it on (or tick the installer's startup option), and removes it when
+  you turn it off or uninstall. Turning it on also clears a "disabled" mark that
+  Task Manager may have left for BUKU under
+  `...\Explorer\StartupApproved\Run`, which BUKU reads to show the switch
+  correctly.

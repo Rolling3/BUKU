@@ -50,7 +50,8 @@ The notch hides itself while a full-screen app (a game, a full-screen video) is
 in front, and comes back when it closes. Turn on **Show over full screen** to
 keep it on top instead; games that take the screen over in exclusive mode still
 cover it. BUKU sleeps when nothing changes: no
-polling, no timers and no frames while the notch is still.
+polling and no frames while the notch is still, and a timer only for what is
+due next (a water reminder, the focus countdown, the next lyric line).
 
 ## Requirements
 
@@ -60,7 +61,8 @@ polling, no timers and no frames while the notch is still.
 
 Run `BUKU-Setup-<version>.exe`. It installs for the current user only and needs
 no administrator rights. Remove BUKU from **Settings > Apps > Installed apps**,
-like any other app.
+like any other app. Uninstalling asks whether to delete your settings, tasks and
+Shelf list in `%APPDATA%\BUKU\` as well; a silent uninstall leaves them.
 
 ## Using BUKU
 
@@ -85,7 +87,7 @@ Changes apply at once; there is no Save button.
 | Focus length, Break length | The two parts of the focus timer. |
 | Water reminders, Glasses a day | The hourly reminder and the daily goal. |
 | Browse app files | Opens the folder BUKU is installed in. |
-| Clear cache | Removes lyrics lookups that earlier versions of BUKU left in the Windows web cache, and says how many it removed. Nothing else in the cache is touched. |
+| Clear cache | Removes any `lrclib.net` lyrics lookups kept in the Windows web cache, and says how many it removed. Nothing else in the cache is touched. |
 
 **Custom Caps Lock key**: choose **Custom** with the arrows and recording starts.
 Press the key you want (for example Esc or F13), or hold modifiers and press a
@@ -109,6 +111,7 @@ Everything stays on your computer, in `%APPDATA%\BUKU\`:
 | `tasks.json` | Your tasks |
 | `shelf.json` | The locations of the files on the Shelf |
 | `lyric_sync.json` | Lyric timings you set, stored by a hash of title, artist and length, never by name |
+| `<file>.bad` | A copy of one of these files that BUKU couldn't read, kept so the next save doesn't overwrite it; safe to delete |
 
 ## Privacy
 

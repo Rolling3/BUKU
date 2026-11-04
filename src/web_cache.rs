@@ -1,8 +1,8 @@
-//! Lyrics lookups left in the Windows web cache by earlier versions of BUKU.
+//! Lyrics lookups kept in the Windows web cache.
 //!
-//! Lookups now bypass the cache, but versions before that stored each
-//! `lrclib.net` request, with the title it searched for, in the user's WinINet
-//! cache. Clearing removes those entries and nothing else.
+//! Lookups bypass the cache, but a cached `lrclib.net` request would hold the
+//! title it searched for in the user's WinINet cache. Clearing removes any such
+//! entries and nothing else.
 
 use std::collections::HashSet;
 

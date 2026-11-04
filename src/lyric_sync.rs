@@ -4,7 +4,7 @@
 //! Synced lyrics can belong to another cut of a song: a music video often has an
 //! intro the album version lacks, so every line lands early by the same amount.
 //! The user lines the lyrics up once and the offset is kept for that song.
-//! Songs are stored by a hash of title and artist, never by name.
+//! Songs are stored by a hash of title, artist and length, never by name.
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
