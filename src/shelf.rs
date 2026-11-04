@@ -100,7 +100,7 @@ fn same_file(a: &Path, b: &Path) -> bool {
 /// Files that run code when opened. A click on one of these shows it in its folder
 /// instead, so a stray click on the Shelf never starts a program.
 #[rustfmt::skip]
-const RUNNABLE: [&str; 74] = [
+const RUNNABLE: [&str; 94] = [
     "exe", "com", "scr", "pif", "cpl", "msi", "msp", "msc", "bat", "cmd", "ps1", "psm1", "vbs",
     "vbe", "js", "jse", "wsf", "wsh", "hta", "reg", "jar", "appx", "vb", "ws", "msh", "sct", "url",
     "scf", "lnk", "inf", "chm", "xll", "py", "pyw", "jnlp", "msix", "msixbundle", "appxbundle",
@@ -108,6 +108,10 @@ const RUNNABLE: [&str; 74] = [
     "library-ms", "search-ms", "searchconnector-ms", "xbap", "bas", "wsc", "ps1xml", "psc1",
     "psd1", "dll", "ocx", "iso", "img", "vhd", "vhdx", "docm", "xlsm", "pptm", "dotm", "xltm",
     "potm", "ppam", "xlam", "mde", "ade", "adp", "accde", "msu", "wsb", "vsto",
+    // A theme can point at a remote file and send the Windows sign-in to it.
+    "theme", "themepack", "deskthemepack", "website", "gadget", "mht", "mhtml",
+    // Run by an interpreter or installer, when one is there.
+    "pyz", "pyzw", "pyc", "pyo", "pl", "rb", "sh", "hlp", "shb", "shs", "ins", "isp", "cab",
 ];
 
 /// Windows drops trailing dots and spaces from a file name, so `a.exe.` runs as
@@ -276,6 +280,39 @@ mod tests {
         let checks = [r"C:\x\.bat", ".exe", ".lnk.", ".js ", ".txt", "."]
             .map(|name| is_runnable(Path::new(name)));
         assert_eq!(checks, [true, true, true, true, false, false]);
+    }
+
+    #[test]
+    fn files_that_reach_out_or_run_by_their_handler_should_not_open_directly() {
+        // A theme can point at a remote file and send the Windows sign-in to it;
+        // the others run code through whatever handles them.
+        let names = [
+            "a.theme",
+            "a.themepack",
+            "a.deskthemepack",
+            "a.website",
+            "a.gadget",
+            "a.mht",
+            "a.mhtml",
+            "a.pyz",
+            "a.pyzw",
+            "a.pyc",
+            "a.pyo",
+            "a.pl",
+            "a.rb",
+            "a.sh",
+            "a.hlp",
+            "a.shb",
+            "a.shs",
+            "a.ins",
+            "a.isp",
+            "a.cab",
+        ];
+        let missed: Vec<_> = names
+            .iter()
+            .filter(|name| !is_runnable(Path::new(name)))
+            .collect();
+        assert!(missed.is_empty(), "opened directly: {missed:?}");
     }
 
     #[test]
