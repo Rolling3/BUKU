@@ -72,6 +72,7 @@ use crate::draw::{
 };
 use crate::gfx::Gfx;
 use crate::input::TaskInput;
+use crate::lyric_sync::{self, LyricSync, Step};
 use crate::lyrics::{self, Lyrics};
 use crate::media::{self, Media};
 use crate::msg::{self, WindowHandle};
@@ -229,6 +230,8 @@ struct App {
     page: Page,
     pomodoro: Pomodoro,
     water: WaterLog,
+    /// Per-song lyric offsets set on the Music card.
+    lyric_sync: LyricSync,
     /// Seconds since 1970 when BUKU started, or the last water reminder was shown;
     /// the next reminder is counted from here when it's later than the last glass.
     water_since: u64,
@@ -497,6 +500,7 @@ impl App {
             page: Page::default(),
             pomodoro: Pomodoro::new(settings_focus, settings_break),
             water: WaterLog::load(),
+            lyric_sync: LyricSync::load(),
             water_since: water::unix_now(),
             tasks: TaskList::load(),
             input: None,

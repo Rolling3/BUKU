@@ -261,6 +261,8 @@ impl App {
                         artist: &track.artist,
                         playing: state.playing,
                         lyric: lyric.as_deref(),
+                        lyric_offset: matches!(state.lyrics, Some(Lyrics::Synced(_)))
+                            .then(|| self.lyric_offset(&state)),
                         position_ms: state.position_ms(),
                         duration_ms: track.duration_ms,
                         art,

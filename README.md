@@ -26,6 +26,10 @@
   inside the notch while music plays, and on the media card. Each line appears a
   moment before it is sung (1 second by default, adjustable). Video titles such
   as "Artist - Song (Official Video)" are cleaned before the lookup.
+  - Lyrics for another cut of a song (a video with a longer intro, say) can run
+    early or late. On the media card, click the lyric line the moment it is sung,
+    or use the arrows beside it to move a line back or forward to now. BUKU keeps
+    that timing for the song; click the offset under the bar to reset it.
 - **Focus timer**: a Pomodoro, 25 minutes of focus and then a 5-minute break by
   default. The countdown shows in the notch while it runs, with a chime when
   each part ends.
@@ -103,6 +107,7 @@ Everything stays on your computer, in `%APPDATA%\BUKU\`:
 | `water.json` | The day's water count |
 | `tasks.json` | Your tasks |
 | `shelf.json` | The locations of the files on the Shelf |
+| `lyric_sync.json` | Lyric timings you set, stored by a hash of title, artist and length, never by name |
 
 ## Privacy
 

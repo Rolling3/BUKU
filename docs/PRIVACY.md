@@ -49,6 +49,9 @@ Normal removes the hook.
 - Settings, the day's water count and your tasks are stored in `%APPDATA%\BUKU\`
   (`settings.json`, `water.json`, `tasks.json`, `shelf.json`) and never leave
   your computer. The Shelf stores file locations only, never file contents.
+- Lyric timings you set on the media card are stored in
+  `%APPDATA%\BUKU\lyric_sync.json` as a hash of each song's title, artist and length
+  with its offset, never the song's name, and never leave your computer.
 - Battery level, power source, the network name and the sound output's name are
   read from Windows when they change and only drawn on screen.
 - "Start with Windows" adds a `BUKU` value under

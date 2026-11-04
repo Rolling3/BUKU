@@ -13,6 +13,7 @@ mod dragdrop;
 mod draw;
 mod gfx;
 mod input;
+mod lyric_sync;
 mod lyrics;
 mod media;
 mod msg;

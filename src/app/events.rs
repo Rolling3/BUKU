@@ -34,6 +34,27 @@ fn lyric_schedule(
     (shown.checked_sub(1), next_in)
 }
 
+/// `lyric_schedule` at a position that is negative before shifted lyrics begin:
+/// then nothing shows yet, and the first line comes once playback gets there.
+fn lyric_schedule_at(
+    lines: &[lyrics::Line],
+    position_ms: i64,
+    early_ms: u32,
+) -> (Option<usize>, Option<u64>) {
+    match u64::try_from(position_ms) {
+        Ok(position) => lyric_schedule(lines, position, early_ms),
+        Err(_) => {
+            let first = lines
+                .first()
+                .map(|line| line.time_ms.saturating_sub(u64::from(early_ms)));
+            (
+                None,
+                first.map(|first| first.saturating_add(position_ms.unsigned_abs())),
+            )
+        }
+    }
+}
+
 impl App {
     // ----- HUDs -----
 
@@ -458,11 +479,27 @@ impl App {
         self.current_lyric_in(&state)
     }
 
+    /// The offset the user set for the playing song, 0 when none.
+    pub(super) fn lyric_offset(&self, state: &media::MediaState) -> i64 {
+        state.track.as_ref().map_or(0, |track| {
+            self.lyric_sync.offset_ms(lyric_sync::song_key(
+                &track.title,
+                &track.artist,
+                track.duration_ms,
+            ))
+        })
+    }
+
+    /// Where in the lyrics file playback is, after the song's offset.
+    fn lyric_position(&self, state: &media::MediaState) -> i64 {
+        lyric_sync::lyric_position(state.position_ms(), self.lyric_offset(state))
+    }
+
     pub(super) fn current_lyric_in(&self, state: &media::MediaState) -> Option<String> {
         match &state.lyrics {
             Some(Lyrics::Synced(lines)) => {
                 let early = self.settings.lyrics_early_ms;
-                let index = lyric_schedule(lines, state.position_ms(), early).0?;
+                let index = lyric_schedule_at(lines, self.lyric_position(state), early).0?;
                 let text = lines[index].text.trim();
                 (!text.is_empty()).then(|| text.to_owned())
             }
@@ -486,7 +523,7 @@ impl App {
         let next_in = match (&state.lyrics, state.playing) {
             (Some(Lyrics::Synced(lines)), true) => {
                 let early = self.settings.lyrics_early_ms;
-                let (index, next_in) = lyric_schedule(lines, state.position_ms(), early);
+                let (index, next_in) = lyric_schedule_at(lines, self.lyric_position(&state), early);
                 self.lyric_index = index;
                 next_in
             }
@@ -589,11 +626,39 @@ impl App {
                 }
             }
             Some(Button::ShelfClear) => self.shelf.clear(),
+            Some(Button::LyricThisLine) => self.line_up_lyrics(Some(Step::Shown)),
+            Some(Button::LyricPrevious) => self.line_up_lyrics(Some(Step::Previous)),
+            Some(Button::LyricNext) => self.line_up_lyrics(Some(Step::Next)),
+            Some(Button::LyricReset) => self.line_up_lyrics(None),
             None => return,
         }
         if !self.animating {
             self.render();
         }
+    }
+
+    /// Shifts the playing song's lyrics so the line `step` asks for starts now,
+    /// or back to the file's own timing with `None`, and keeps that for the song.
+    fn line_up_lyrics(&mut self, step: Option<Step>) {
+        let state = media::lock(&self.media.state);
+        let (Some(track), Some(Lyrics::Synced(lines))) = (&state.track, &state.lyrics) else {
+            return;
+        };
+        let song = lyric_sync::song_key(&track.title, &track.artist, track.duration_ms);
+        let offset = match step {
+            None => 0,
+            Some(step) => {
+                let early = self.settings.lyrics_early_ms;
+                let shown = lyric_schedule_at(lines, self.lyric_position(&state), early).0;
+                let Some(time) = lyric_sync::target_time(lines, shown, step) else {
+                    return;
+                };
+                lyric_sync::offset_starting(time, state.position_ms())
+            }
+        };
+        drop(state);
+        self.lyric_sync.set(song, offset);
+        self.schedule_lyric();
     }
 
     // ----- Pomodoro -----
@@ -688,8 +753,17 @@ impl App {
     /// What the current card page shows, for hit-testing.
     fn page_kind(&self) -> PageKind {
         match self.page {
-            Page::Music if media::lock(&self.media.state).track.is_some() => PageKind::Music,
-            Page::Music => PageKind::Idle,
+            Page::Music => {
+                let state = media::lock(&self.media.state);
+                if state.track.is_none() {
+                    return PageKind::Idle;
+                }
+                let lyrics = matches!(state.lyrics, Some(Lyrics::Synced(_)));
+                PageKind::Music {
+                    lyrics,
+                    offset: lyrics && self.lyric_offset(&state) != 0,
+                }
+            }
             Page::Focus => PageKind::Focus,
             Page::Water => PageKind::Water,
             Page::Shelf => PageKind::Shelf {
@@ -959,6 +1033,19 @@ mod tests {
     fn a_long_gap_should_keep_the_whole_lead() {
         let lines = lines(&[0, 400, 5_000]);
         assert_eq!(lyric_schedule(&lines, 4_000, 1_000), (Some(2), None));
+    }
+
+    #[test]
+    fn before_a_shifted_song_reaches_its_lyrics_no_line_should_show() {
+        // Lyrics shifted 19 s later, 5 s into the song: 14 s before the file starts.
+        let lines = lines(&[500, 4_000]);
+        assert_eq!(
+            [
+                lyric_schedule_at(&lines, -14_000, 1_000),
+                lyric_schedule_at(&lines, 2_000, 1_000),
+            ],
+            [(None, Some(14_000)), (Some(0), Some(1_000))]
+        );
     }
 
     #[test]

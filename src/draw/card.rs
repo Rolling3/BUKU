@@ -9,6 +9,7 @@ use windows::Win32::Graphics::DirectWrite::{
 };
 
 use super::*;
+use crate::lyric_sync;
 
 pub const CARD_W: f32 = 450.0;
 pub const CARD_H: f32 = 188.0;
@@ -28,6 +29,8 @@ const GLYPH_ADD: &str = "\u{E710}";
 const GLYPH_REMOVE: &str = "\u{E738}";
 const GLYPH_CHECK: &str = "\u{E73E}";
 const GLYPH_CLOSE: &str = "\u{E711}";
+const GLYPH_CHEVRON_LEFT: &str = "\u{E76B}";
+const GLYPH_CHEVRON_RIGHT: &str = "\u{E76C}";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Page {
@@ -57,6 +60,14 @@ pub enum Button {
     Mute,
     /// The volume bar: a press or drag sets the level where the pointer is.
     Volume,
+    /// The lyric line: the line shown starts now.
+    LyricThisLine,
+    /// Left of the lyric line: the line before starts now.
+    LyricPrevious,
+    /// Right of the lyric line: the line after starts now.
+    LyricNext,
+    /// The offset under the lyric line: back to the lyrics' own timing.
+    LyricReset,
     FocusStartPause,
     FocusReset,
     WaterAdd,
@@ -77,6 +88,9 @@ pub struct MediaCard<'a> {
     pub artist: &'a str,
     pub playing: bool,
     pub lyric: Option<&'a str>,
+    /// The song's lyric offset when it has synced lyrics; the timing controls
+    /// show only then.
+    pub lyric_offset: Option<i64>,
     pub position_ms: u64,
     pub duration_ms: u64,
     pub art: Option<&'a ID2D1Bitmap1>,
@@ -142,7 +156,12 @@ pub struct Card<'a> {
 /// What each page shows, for hit-testing without building a whole `Card`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PageKind {
-    Music,
+    Music {
+        /// Synced lyrics, which the timing controls line up.
+        lyrics: bool,
+        /// The song's lyrics are shifted, so the reset shows.
+        offset: bool,
+    },
     Idle,
     Focus,
     Water,
@@ -184,6 +203,17 @@ const VOLUME_ICON_X: f32 = 130.0;
 const VOLUME_BAR_LEFT: f32 = 112.0;
 const VOLUME_BAR_RIGHT: f32 = 24.0;
 const VOLUME_HIT_H: f32 = 16.0;
+
+// The lyric line, with a step button at each end, between the volume row and
+// the progress bar; the offset sits between the two clocks under the bar.
+const LYRIC_Y: f32 = 82.0;
+const LYRIC_H: f32 = 28.0;
+const LYRIC_STEP_X: f32 = 32.0;
+const LYRIC_STEP_R: f32 = 12.0;
+const LYRIC_TEXT_INSET: f32 = 50.0;
+const OFFSET_Y: f32 = 127.0;
+const OFFSET_W: f32 = 130.0;
+const OFFSET_H: f32 = 18.0;
 
 /// Volume (0 to 1) for a pointer at card-relative `x` on a card `width` wide.
 fn volume_at(width: f32, x: f32) -> f32 {
@@ -238,7 +268,47 @@ fn hits(kind: PageKind, width: f32) -> Vec<(Button, Hit)> {
         .collect();
     let circle = |cx: f32, r: f32| Hit::Circle { cx, cy: 50.0, r };
     match kind {
-        PageKind::Music => {
+        PageKind::Music { lyrics, offset } => {
+            if lyrics {
+                let cy = LYRIC_Y + LYRIC_H / 2.0;
+                hits.push((
+                    Button::LyricPrevious,
+                    Hit::Circle {
+                        cx: LYRIC_STEP_X,
+                        cy,
+                        r: LYRIC_STEP_R,
+                    },
+                ));
+                hits.push((
+                    Button::LyricNext,
+                    Hit::Circle {
+                        cx: width - LYRIC_STEP_X,
+                        cy,
+                        r: LYRIC_STEP_R,
+                    },
+                ));
+                // Starts below the speaker icon's circle, which reaches y 84.
+                hits.push((
+                    Button::LyricThisLine,
+                    Hit::Rect {
+                        x: LYRIC_TEXT_INSET,
+                        y: LYRIC_Y + 4.0,
+                        w: width - 2.0 * LYRIC_TEXT_INSET,
+                        h: LYRIC_H - 4.0,
+                    },
+                ));
+            }
+            if lyrics && offset {
+                hits.push((
+                    Button::LyricReset,
+                    Hit::Rect {
+                        x: (width - OFFSET_W) / 2.0,
+                        y: OFFSET_Y,
+                        w: OFFSET_W,
+                        h: OFFSET_H,
+                    },
+                ));
+            }
             hits.push((
                 Button::Previous,
                 Hit::Circle {
@@ -499,7 +569,11 @@ impl Painter<'_> {
         self.text(card.title, &fonts.title, 88.0, 22.0, text_w, 22.0, TEXT);
         self.text(card.artist, &fonts.body, 88.0, 44.0, text_w, 20.0, TEXT_DIM);
 
-        for (button, hit) in hits(PageKind::Music, self.width) {
+        let playback = PageKind::Music {
+            lyrics: false,
+            offset: false,
+        };
+        for (button, hit) in hits(playback, self.width) {
             let Hit::Circle { cx, cy, r } = hit else {
                 continue;
             };
@@ -526,14 +600,20 @@ impl Painter<'_> {
             self.volume_row(level, muted, hot);
         }
 
+        let inset = if card.lyric_offset.is_some() {
+            self.lyric_controls(hot, card.lyric.is_some());
+            LYRIC_TEXT_INSET
+        } else {
+            20.0
+        };
         if let Some(line) = card.lyric {
             self.text(
                 line,
                 &fonts.lyric_center,
-                20.0,
-                82.0,
-                w - 40.0,
-                28.0,
+                inset,
+                LYRIC_Y,
+                w - 2.0 * inset,
+                LYRIC_H,
                 accent::current(),
             );
         }
@@ -563,6 +643,65 @@ impl Painter<'_> {
                 16.0,
                 TEXT_DIM,
                 DWRITE_TEXT_ALIGNMENT_TRAILING,
+            );
+        }
+        if let Some(offset) = card.lyric_offset.filter(|&offset| offset != 0) {
+            let hovered = hot == Some(Button::LyricReset);
+            let (label, color) = if hovered {
+                ("Reset lyric timing".to_owned(), TEXT)
+            } else {
+                (lyric_sync::describe(offset), TEXT_DIM)
+            };
+            let x = (w - OFFSET_W) / 2.0;
+            if hovered {
+                self.pill(x, OFFSET_Y, OFFSET_W, OFFSET_H, HOT);
+            }
+            self.aligned(
+                &label,
+                &fonts.small,
+                x,
+                OFFSET_Y + 1.0,
+                OFFSET_W,
+                16.0,
+                color,
+                DWRITE_TEXT_ALIGNMENT_CENTER,
+            );
+        }
+    }
+
+    /// The step buttons beside the lyric line, and its highlight on hover while a
+    /// line shows.
+    fn lyric_controls(&self, hot: Option<Button>, line_shown: bool) {
+        let w = self.width;
+        let cy = LYRIC_Y + LYRIC_H / 2.0;
+        if line_shown && hot == Some(Button::LyricThisLine) {
+            self.pill(
+                LYRIC_TEXT_INSET,
+                LYRIC_Y + 2.0,
+                w - 2.0 * LYRIC_TEXT_INSET,
+                LYRIC_H - 4.0,
+                HOT,
+            );
+        }
+        for (button, cx, glyph) in [
+            (Button::LyricPrevious, LYRIC_STEP_X, GLYPH_CHEVRON_LEFT),
+            (Button::LyricNext, w - LYRIC_STEP_X, GLYPH_CHEVRON_RIGHT),
+        ] {
+            let color = if hot == Some(button) {
+                self.circle(cx, cy, LYRIC_STEP_R, HOT);
+                TEXT
+            } else {
+                TEXT_DIM
+            };
+            let r = LYRIC_STEP_R;
+            self.text(
+                glyph,
+                &self.gfx.fonts.icon_small,
+                cx - r,
+                cy - r,
+                r * 2.0,
+                r * 2.0,
+                color,
             );
         }
     }
@@ -984,8 +1123,12 @@ mod edge_case_tests {
     #[test]
     fn the_volume_row_should_not_take_clicks_from_the_playback_buttons() {
         let w = CARD_W;
+        let kind = PageKind::Music {
+            lyrics: false,
+            offset: false,
+        };
         let at = |x: f32, y: f32| {
-            hits(PageKind::Music, w)
+            hits(kind, w)
                 .into_iter()
                 .find(|(_, hit)| hit.contains(x, y))
                 .map(|(b, _)| b)
@@ -1003,6 +1146,70 @@ mod edge_case_tests {
                 Some(Button::Mute),
                 None
             ]
+        );
+    }
+
+    fn music_at(lyrics: bool, offset: bool, x: f32, y: f32) -> Option<Button> {
+        hits(PageKind::Music { lyrics, offset }, CARD_W)
+            .into_iter()
+            .find(|(_, hit)| hit.contains(x, y))
+            .map(|(button, _)| button)
+    }
+
+    #[test]
+    fn the_lyric_controls_should_sit_on_the_lyric_line() {
+        let w = CARD_W;
+        let cy = LYRIC_Y + LYRIC_H / 2.0;
+        assert_eq!(
+            [
+                music_at(true, false, LYRIC_STEP_X, cy),
+                music_at(true, false, w / 2.0, cy),
+                music_at(true, false, w - LYRIC_STEP_X, cy),
+            ],
+            [
+                Some(Button::LyricPrevious),
+                Some(Button::LyricThisLine),
+                Some(Button::LyricNext)
+            ]
+        );
+    }
+
+    #[test]
+    fn the_lyric_controls_should_not_take_clicks_from_the_volume_row() {
+        let w = CARD_W;
+        assert_eq!(
+            [
+                music_at(true, true, w - VOLUME_ICON_X, VOLUME_CY + 9.0),
+                music_at(true, true, w - 60.0, VOLUME_CY + VOLUME_HIT_H / 2.0),
+                music_at(true, true, w - 80.0, 44.0),
+            ],
+            [
+                Some(Button::Mute),
+                Some(Button::Volume),
+                Some(Button::PlayPause)
+            ]
+        );
+    }
+
+    #[test]
+    fn without_synced_lyrics_there_should_be_no_lyric_controls() {
+        let cy = LYRIC_Y + LYRIC_H / 2.0;
+        assert_eq!(
+            [
+                music_at(false, true, LYRIC_STEP_X, cy),
+                music_at(false, true, CARD_W / 2.0, cy),
+                music_at(false, true, CARD_W / 2.0, OFFSET_Y + 8.0),
+            ],
+            [None, None, None]
+        );
+    }
+
+    #[test]
+    fn the_reset_should_show_only_while_the_lyrics_are_shifted() {
+        let (x, y) = (CARD_W / 2.0, OFFSET_Y + 8.0);
+        assert_eq!(
+            [music_at(true, false, x, y), music_at(true, true, x, y)],
+            [None, Some(Button::LyricReset)]
         );
     }
 
