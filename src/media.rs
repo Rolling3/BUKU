@@ -45,6 +45,8 @@ pub struct MediaState {
     pub playing: bool,
     position_ms: u64,
     sampled_at: Instant,
+    /// Playback speed: 1.0 normally, 2.0 at double speed.
+    rate: f64,
     pub lyrics: Option<Lyrics>,
     /// The track the current `lyrics` (or the fetch in flight) belong to.
     lyrics_track: Option<(String, String)>,
@@ -64,6 +66,7 @@ impl Default for MediaState {
             playing: false,
             position_ms: 0,
             sampled_at: Instant::now(),
+            rate: 1.0,
             lyrics: None,
             lyrics_track: None,
             art: None,
@@ -79,7 +82,8 @@ impl MediaState {
     pub fn position_ms(&self) -> u64 {
         let mut position = self.position_ms;
         if self.playing {
-            position += self.sampled_at.elapsed().as_millis() as u64;
+            let elapsed = self.sampled_at.elapsed().as_millis() as u64;
+            position = advance(position, elapsed, self.rate);
         }
         match &self.track {
             Some(track) if track.duration_ms > 0 => position.min(track.duration_ms),
@@ -438,6 +442,7 @@ impl Worker {
                 state.source_app = snapshot.source_app;
                 state.position_ms = snapshot.position_ms;
                 state.sampled_at = Instant::now();
+                state.rate = snapshot.rate;
                 let key = (snapshot.track.title.clone(), snapshot.track.artist.clone());
                 if state.lyrics_track.as_ref() != Some(&key) {
                     state.lyrics_track = Some(key);
@@ -596,6 +601,7 @@ struct Snapshot {
     track: Track,
     playing: bool,
     position_ms: u64,
+    rate: f64,
     thumbnail: Option<IRandomAccessStreamReference>,
     source_app: String,
 }
@@ -608,6 +614,20 @@ struct Reported {
     position: i64,
     /// When the position was sampled (FILETIME), or 0 when it isn't advancing.
     updated: i64,
+    /// Playback speed since then.
+    rate: f64,
+}
+
+/// `position_ms` after `elapsed_ms` of playback at `rate`.
+fn advance(position_ms: u64, elapsed_ms: u64, rate: f64) -> u64 {
+    position_ms.saturating_add((elapsed_ms as f64 * rate) as u64)
+}
+
+/// The speed a player reports, or normal speed for nothing or nonsense.
+fn playback_rate(reported: Option<f64>) -> f64 {
+    reported
+        .filter(|rate| rate.is_finite() && *rate > 0.0 && *rate <= 16.0)
+        .unwrap_or(1.0)
 }
 
 impl Reported {
@@ -616,7 +636,8 @@ impl Reported {
         const TICKS_PER_MS: i64 = 10_000;
         let mut position = self.position.saturating_sub(self.start);
         if self.updated > 0 && now > self.updated {
-            position = position.saturating_add(now.saturating_sub(self.updated));
+            let elapsed = now.saturating_sub(self.updated) as f64 * self.rate;
+            position = position.saturating_add(elapsed as i64);
         }
         let ms = |ticks: i64| (ticks.max(0) / TICKS_PER_MS) as u64;
         (ms(self.end.saturating_sub(self.start)), ms(position))
@@ -625,7 +646,9 @@ impl Reported {
 
 fn read_session(session: &Session) -> Result<Snapshot> {
     let properties = session.TryGetMediaPropertiesAsync()?.join()?;
-    let playing = session.GetPlaybackInfo()?.PlaybackStatus()? == PlaybackStatus::Playing;
+    let info = session.GetPlaybackInfo()?;
+    let playing = info.PlaybackStatus()? == PlaybackStatus::Playing;
+    let rate = playback_rate(info.PlaybackRate().ok().and_then(|rate| rate.Value().ok()));
     let timeline = session.GetTimelineProperties()?;
 
     let reported = Reported {
@@ -638,6 +661,7 @@ fn read_session(session: &Session) -> Result<Snapshot> {
         } else {
             0
         },
+        rate,
     };
     let now = unsafe { GetSystemTimePreciseAsFileTime() };
     let now = ((now.dwHighDateTime as i64) << 32) | now.dwLowDateTime as i64;
@@ -652,6 +676,7 @@ fn read_session(session: &Session) -> Result<Snapshot> {
         },
         playing,
         position_ms,
+        rate,
         thumbnail: properties.Thumbnail().ok(),
         source_app: session
             .SourceAppUserModelId()
@@ -792,12 +817,52 @@ mod timeline_tests {
     use super::*;
 
     #[test]
+    fn to_ms_should_advance_at_the_playback_rate() {
+        let reported = Reported {
+            start: 0,
+            end: 600_000_000,
+            position: 10_000_000,
+            updated: 1_000,
+            rate: 2.0,
+        };
+        assert_eq!(reported.to_ms(1_000 + 20_000_000), (60_000, 5_000));
+    }
+
+    #[test]
+    fn the_extrapolated_position_should_follow_the_rate() {
+        assert_eq!(
+            [
+                advance(10_000, 2_000, 1.0),
+                advance(10_000, 2_000, 1.5),
+                advance(10_000, 2_000, 0.5)
+            ],
+            [12_000, 13_000, 11_000]
+        );
+    }
+
+    #[test]
+    fn a_rate_a_player_should_never_send_should_count_as_normal_speed() {
+        assert_eq!(
+            [
+                playback_rate(Some(1.5)),
+                playback_rate(None),
+                playback_rate(Some(0.0)),
+                playback_rate(Some(-2.0)),
+                playback_rate(Some(f64::NAN)),
+                playback_rate(Some(1e9)),
+            ],
+            [1.5, 1.0, 1.0, 1.0, 1.0, 1.0]
+        );
+    }
+
+    #[test]
     fn to_ms_should_add_the_time_since_the_player_reported() {
         let reported = Reported {
             start: 0,
             end: 600_000_000,
             position: 10_000_000,
             updated: 1_000,
+            rate: 1.0,
         };
         assert_eq!(reported.to_ms(1_000 + 20_000_000), (60_000, 3_000));
     }
@@ -809,6 +874,7 @@ mod timeline_tests {
             end: i64::MAX,
             position: i64::MAX,
             updated: 1,
+            rate: 1.0,
         };
         let (duration, position) = reported.to_ms(i64::MAX);
         assert_eq!(
@@ -824,6 +890,7 @@ mod timeline_tests {
             end: 0,
             position: 0,
             updated: 0,
+            rate: 1.0,
         };
         assert_eq!(reported.to_ms(0), (0, 0));
     }
