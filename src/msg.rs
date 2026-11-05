@@ -51,6 +51,10 @@ pub const SETTLE: u32 = WM_APP + 22;
 /// To the Settings window: clearing cached lyrics lookups finished; the result
 /// is packed by `web_cache::to_message`.
 pub const CACHE_CLEARED: u32 = WM_APP + 23;
+/// Open the Spotify shortcut stored in `App::spotify_open`.
+pub const SPOTIFY_OPEN: u32 = WM_APP + 24;
+/// Names for Spotify shortcuts arrived; read them from the shared list.
+pub const SPOTIFY_NAME: u32 = WM_APP + 25;
 
 /// An `HWND` that can cross threads. Posting to a window from any thread is allowed.
 #[derive(Clone, Copy)]

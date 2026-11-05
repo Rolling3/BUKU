@@ -68,7 +68,7 @@ use crate::display;
 use crate::dragdrop::{self, DropTarget, Dropped};
 use crate::draw::{
     self, Button, Card, Content, FocusCard, Hud, MediaCard, Page, PageBody, PageKind, SHELF_TILES,
-    Scene, ShelfCard, TASK_ROWS, TasksCard, WaterCard,
+    SPOTIFY_TILES, Scene, ShelfCard, SpotifyCard, TASK_ROWS, TasksCard, WaterCard,
 };
 use crate::gfx::Gfx;
 use crate::input::TaskInput;
@@ -79,6 +79,7 @@ use crate::msg::{self, WindowHandle};
 use crate::pomodoro::{self, Phase, Pomodoro};
 use crate::settings::Settings;
 use crate::shelf::{self, Shelf};
+use crate::spotify::{self, Link, Shortcuts};
 use crate::system;
 use crate::tasks::TaskList;
 use crate::water::{self, WaterLog};
@@ -87,6 +88,8 @@ use windows::Networking::Connectivity::{NetworkInformation, NetworkStatusChanged
 
 mod events;
 mod view;
+
+use events::right_click;
 
 /// The power-policy brightness setting; changes when the user presses brightness
 /// keys or moves the Windows slider. Adaptive brightness doesn't touch it, so the
@@ -241,8 +244,18 @@ struct App {
     /// the next reminder is counted from here when it's later than the last glass.
     water_since: u64,
     tasks: TaskList,
-    /// The text box for a new task, while it's open.
+    /// The text box for a new task or Spotify shortcut, while it's open.
     input: Option<TaskInput>,
+    /// What the open text box is for.
+    input_for: InputFor,
+    /// What the next text box opened is for; set by the button that asks for one.
+    input_next: Option<InputFor>,
+    /// Spotify shortcuts.
+    spotify: Shortcuts,
+    /// Names Spotify sent for new shortcuts, until `SPOTIFY_NAME` picks them up.
+    spotify_names: spotify::Names,
+    /// The shortcut that was clicked, opened from the message loop.
+    spotify_open: Option<Link>,
     /// When a task was last ticked or deleted, to swallow the second click of a double-click.
     tasks_changed_at: Option<Instant>,
 
@@ -374,13 +387,25 @@ unsafe extern "system" fn wndproc(
         // Creating and destroying the text box moves keyboard focus, which sends
         // messages back here; like the menu, that happens with no borrow of the App.
         if message == msg::INPUT_OPEN {
-            if (*app).input.is_none() && (*app).can_add_task() {
+            let purpose = (*app).input_next.take();
+            if let Some(purpose) = purpose
+                && (*app).input.is_none()
+                && (*app).can_open_input(&purpose)
+            {
                 let (x, y, width, height, scale) = (*app).input_rect();
-                let input = TaskInput::open(hwnd, x, y, width, height, scale).ok();
+                let (hint, limit) = purpose.hint();
+                let input = TaskInput::open(hwnd, x, y, width, height, scale, hint, limit).ok();
                 let app = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut App;
-                if !app.is_null() {
+                if !app.is_null() && input.is_some() {
                     (*app).input = input;
+                    (*app).input_for = purpose;
                 }
+            }
+            return LRESULT(0);
+        }
+        if message == msg::SPOTIFY_OPEN {
+            if let Some(link) = (*app).spotify_open.take() {
+                spotify::open(&link);
             }
             return LRESULT(0);
         }
@@ -516,6 +541,11 @@ impl App {
             water_since: water::unix_now(),
             tasks: TaskList::load(),
             input: None,
+            input_for: InputFor::Task,
+            input_next: None,
+            spotify: Shortcuts::load(),
+            spotify_names: Default::default(),
+            spotify_open: None,
             tasks_changed_at: None,
             on_ac: None,
             battery: None,
@@ -632,6 +662,7 @@ impl App {
             msg::APPBAR => self.on_appbar(wparam, lparam),
             msg::FOREGROUND => self.update_fullscreen(false),
             msg::SETTLE => self.settle(),
+            msg::SPOTIFY_NAME => self.on_spotify_names(),
             WM_POWERBROADCAST if wparam.0 == PBT_POWERSETTINGCHANGE as usize => {
                 self.on_power_setting(lparam);
                 return Some(LRESULT(1));
@@ -700,7 +731,11 @@ impl App {
                     self.on_button(released);
                 }
             }
-            WM_RBUTTONUP => WindowHandle::new(self.hwnd).post(msg::SHOW_MENU, 0, 0),
+            // A right-click on a Spotify shortcut removes it; anywhere else, the menu.
+            WM_RBUTTONUP => match right_click(self.button_at(lparam)) {
+                Some(button) => self.on_button(Some(button)),
+                None => WindowHandle::new(self.hwnd).post(msg::SHOW_MENU, 0, 0),
+            },
             // Clicks must never take focus away from the window the user is typing in.
             WM_MOUSEACTIVATE => return Some(LRESULT(MA_NOACTIVATE as isize)),
             // Sent from inside the move's own SetWindowPos, with this App still in
@@ -954,6 +989,35 @@ impl App {
 /// The task text box only makes sense on the open Tasks page with room for one more task.
 fn task_input_allowed(shown: View, page: Page, full: bool) -> bool {
     shown == View::Card && page == Page::Tasks && !full
+}
+
+/// What the text box under the card is for.
+#[derive(Clone, Debug, PartialEq)]
+enum InputFor {
+    Task,
+    /// The link of a new Spotify shortcut.
+    SpotifyLink,
+    /// The name of a new Spotify shortcut whose link was just given.
+    SpotifyName(Link),
+}
+
+impl InputFor {
+    /// The page the box belongs to: moving to another closes it.
+    fn page(&self) -> Page {
+        match self {
+            InputFor::Task => Page::Tasks,
+            InputFor::SpotifyLink | InputFor::SpotifyName(_) => Page::Spotify,
+        }
+    }
+
+    /// The hint in the empty box and how many characters it takes.
+    fn hint(&self) -> (&'static str, usize) {
+        match self {
+            InputFor::Task => ("New task", crate::tasks::MAX_TASK_CHARS),
+            InputFor::SpotifyLink => ("Paste a Spotify link", spotify::MAX_LINK_CHARS),
+            InputFor::SpotifyName(_) => ("Name", spotify::MAX_NAME_CHARS),
+        }
+    }
 }
 
 fn appbar_data(hwnd: HWND) -> APPBARDATA {

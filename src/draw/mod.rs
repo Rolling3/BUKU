@@ -7,7 +7,8 @@ mod card;
 
 pub use card::{
     Button, CARD_H, CARD_W, Card, FocusCard, MediaCard, Page, PageBody, PageKind, SHELF_TILES,
-    ShelfCard, TASK_ROWS, TasksCard, WaterCard, button_at, volume_at_canvas,
+    SPOTIFY_TILES, ShelfCard, SpotifyCard, TASK_ROWS, TasksCard, WaterCard, button_at,
+    volume_at_canvas,
 };
 
 use windows::Win32::Graphics::Direct2D::Common::{

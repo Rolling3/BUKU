@@ -21,6 +21,7 @@ mod pomodoro;
 mod settings;
 mod settings_window;
 mod shelf;
+mod spotify;
 mod store;
 mod system;
 mod tasks;

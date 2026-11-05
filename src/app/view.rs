@@ -316,6 +316,15 @@ impl App {
                         more: self.shelf.items().len().saturating_sub(SHELF_TILES),
                         dragging: self.drag_over,
                     }),
+                    (Page::Spotify, _) => PageBody::Spotify(SpotifyCard {
+                        names: self
+                            .spotify
+                            .items()
+                            .iter()
+                            .take(SPOTIFY_TILES)
+                            .map(spotify::Shortcut::shown_name)
+                            .collect(),
+                    }),
                     (Page::Water, _) => PageBody::Water(WaterCard {
                         glasses: self.water.glasses(&water::local_now().date),
                         goal: self.settings.water_goal,

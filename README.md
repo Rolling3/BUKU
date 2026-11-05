@@ -7,7 +7,7 @@
 <p align="center">
   A little notch for the top of your Windows screen.<br>
   Volume, brightness and Caps Lock pop-ups, music with synced lyrics, a focus
-  timer, water reminders, tasks and a file shelf.
+  timer, water reminders, tasks, a file shelf and Spotify shortcuts.
 </p>
 
 ## Features
@@ -44,6 +44,12 @@
   it, or drag it back out into any folder or app. Only the file's location is
   remembered; nothing is copied. Programs and scripts are never run from the
   Shelf: clicking one opens its folder instead.
+- **Spotify**: up to eight shortcuts to your playlists, albums, songs,
+  artists or podcasts. In Spotify, choose **Share > Copy link**, then click
+  **Add** on BUKU's Spotify page and paste it. Clicking a shortcut opens it in
+  the Spotify app (or in the browser without it). Hover a shortcut and click
+  its x, or right-click it, to remove it. Works with free and Premium accounts;
+  BUKU never signs in to Spotify.
 - **Notices** when you plug in or unplug a laptop, when the battery drops to 20%
   and 10%, when the Wi-Fi network changes, when the sound output switches (for
   example to headphones), and when the keyboard language changes.
@@ -69,7 +75,7 @@ Shelf list in `%APPDATA%\BUKU\` as well; a silent uninstall leaves them.
 ## Using BUKU
 
 - Hover the notch to open it, or click it to open it at once. The tabs at the
-  bottom switch between Music, Focus, Water, Tasks and Shelf.
+  bottom switch between Music, Focus, Water, Tasks, Shelf and Spotify.
 - Right-click the notch, or click the tray icon, for **Settings…** and **Exit**.
 
 ### Settings
@@ -85,8 +91,9 @@ Changes apply at once; there is no Save button.
 | Automatically hide BUKU | Hides the notch completely, like an auto-hiding taskbar. Push the pointer against the top of the screen where the notch sits to open it. Nothing shows while it's hidden: no lyrics, countdown or pop-ups. |
 | Accent colour | The colour of switches, the music bars and highlights: white (the default), yellow, orange, red, pink, purple, blue, cyan or green. |
 | Lyrics in the notch | Shows the current line inside the notch while music plays. |
-| Download lyrics | Looks lyrics up on lrclib.net. Off means BUKU makes no network requests at all. |
+| Download lyrics | Looks lyrics up on lrclib.net. Off, BUKU makes no lyrics requests. |
 | Show lyrics early by | How long before it is sung each line appears: 0 to 3 seconds, a tenth of a second at a time. |
+| Name Spotify shortcuts | On, BUKU asks Spotify for a new shortcut's name. Off, it asks you to type one and never contacts Spotify. |
 | Focus length, Break length | The two parts of the focus timer. |
 | Water reminders, Glasses a day | The hourly reminder and the daily goal. |
 | Browse app files | Opens the folder BUKU is installed in. |
@@ -113,15 +120,17 @@ Everything stays on your computer, in `%APPDATA%\BUKU\`:
 | `water.json` | The day's water count |
 | `tasks.json` | Your tasks |
 | `shelf.json` | The locations of the files on the Shelf |
+| `spotify.json` | Your Spotify shortcuts: kind, Spotify id and name |
 | `lyric_sync.json` | Lyric timings you set, stored by a hash of title, artist and length, never by name |
 | `<file>.bad` | A copy of one of these files that BUKU couldn't read, kept so the next save doesn't overwrite it; safe to delete |
 
 ## Privacy
 
-BUKU makes one kind of network request: looking up lyrics on lrclib.net when a
-new track starts, sending only its title, artist, album and length. Nothing is
-kept on disk: no web cache and no cookies. Turn off **Download lyrics** and BUKU
-makes no requests at all.
+BUKU makes two kinds of network request: looking up lyrics on lrclib.net when a
+new track starts, sending only its title, artist, album and length, and asking
+Spotify for a shortcut's name when you add one, sending only that link. Nothing
+is kept on disk: no web cache and no cookies. Turn off **Download lyrics** and
+**Name Spotify shortcuts** and BUKU makes no requests at all.
 
 Caps Lock is observed through Windows raw input, and every other key is ignored
 the moment it arrives. Only a Caps Lock mode other than Normal installs a

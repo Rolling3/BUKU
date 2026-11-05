@@ -15,10 +15,65 @@ fn dropped_while_hidden(auto_hide: bool, card_open: bool) -> bool {
     auto_hide && !card_open
 }
 
-/// Whether moving to `page` must close the task text box: it belongs to the
-/// Tasks page, and staying open under another page would add a task unseen.
-fn closes_task_input(input_open: bool, page: Page) -> bool {
-    input_open && page != Page::Tasks
+/// What a right-click on `button` does: on a Spotify shortcut (its x
+/// included), removes it; `None` elsewhere, where the menu opens.
+pub(super) fn right_click(button: Option<Button>) -> Option<Button> {
+    match button {
+        Some(Button::SpotifyOpen(index) | Button::SpotifyRemove(index)) => {
+            Some(Button::SpotifyRemove(index))
+        }
+        _ => None,
+    }
+}
+
+/// Buttons that act on a list by position. After one removes or ticks an item
+/// the next slides into its place, so the second click of a double-click is
+/// ignored for them.
+fn is_list_click(button: Option<Button>) -> bool {
+    matches!(
+        button,
+        Some(
+            Button::TaskToggle(_)
+                | Button::TaskDelete(_)
+                | Button::TaskClearDone
+                | Button::ShelfOpen(_)
+                | Button::ShelfRemove(_)
+                | Button::ShelfClear
+                | Button::SpotifyOpen(_)
+                | Button::SpotifyRemove(_)
+        )
+    )
+}
+
+/// Whether moving to `page` must close the open text box (`input_page`, the
+/// page it belongs to): staying open under another page would add a task or a
+/// shortcut unseen.
+fn closes_input(input_page: Option<Page>, page: Page) -> bool {
+    input_page.is_some_and(|own| own != page)
+}
+
+/// What a link typed into the Spotify box leads to.
+#[derive(Debug, PartialEq)]
+enum NewShortcut {
+    /// Not a Spotify link, already there, or no room: nothing is added.
+    Refused,
+    /// Added unnamed; Spotify is asked for the name.
+    AddAndLookUp(spotify::Link),
+    /// A second box asks for the name.
+    AskName(spotify::Link),
+}
+
+fn new_shortcut(text: &str, list: &spotify::Shortcuts, look_up_names: bool) -> NewShortcut {
+    match spotify::Link::parse(text) {
+        Some(link) if !list.contains(&link) && !list.is_full() => {
+            if look_up_names {
+                NewShortcut::AddAndLookUp(link)
+            } else {
+                NewShortcut::AskName(link)
+            }
+        }
+        _ => NewShortcut::Refused,
+    }
 }
 
 /// Whether a Shelf file left after being dragged out. A drag that never ran (the
@@ -602,18 +657,7 @@ impl App {
         // Rows are clicked by position. After a task is ticked or deleted the next
         // one slides into its row, so the second click of a double-click would hit a
         // different task. Ignore list clicks for one double-click interval.
-        let list_click = matches!(
-            button,
-            Some(
-                Button::TaskToggle(_)
-                    | Button::TaskDelete(_)
-                    | Button::TaskClearDone
-                    | Button::ShelfOpen(_)
-                    | Button::ShelfRemove(_)
-                    | Button::ShelfClear
-            )
-        );
-        if list_click {
+        if is_list_click(button) {
             let interval = Duration::from_millis(u64::from(unsafe { GetDoubleClickTime() }));
             if self
                 .tasks_changed_at
@@ -675,7 +719,21 @@ impl App {
                 }
             }
             Some(Button::TaskClearDone) => self.tasks.clear_done(),
-            Some(Button::TaskAdd) => WindowHandle::new(self.hwnd).post(msg::INPUT_OPEN, 0, 0),
+            Some(Button::TaskAdd) => self.ask_input(InputFor::Task),
+            Some(Button::SpotifyAdd) => self.ask_input(InputFor::SpotifyLink),
+            Some(Button::SpotifyOpen(index)) => {
+                // Taken now; a removal before the posted message is handled must
+                // not shift the click onto another shortcut.
+                if let Some(shortcut) = self.spotify.items().get(usize::from(index)) {
+                    self.spotify_open = Some(shortcut.link());
+                    WindowHandle::new(self.hwnd).post(msg::SPOTIFY_OPEN, 0, 0);
+                }
+            }
+            Some(Button::SpotifyRemove(index)) => {
+                self.spotify.remove(usize::from(index));
+                self.hot = None;
+                self.render();
+            }
             Some(Button::ShelfOpen(index)) => {
                 // Pin the file now; the tile index may mean another file by the time
                 // the posted message is handled.
@@ -791,6 +849,23 @@ impl App {
         self.schedule_water();
     }
 
+    // ----- Spotify -----
+
+    /// Gives new shortcuts the names Spotify sent for them.
+    pub(super) fn on_spotify_names(&mut self) {
+        let names = match self.spotify_names.lock() {
+            Ok(mut names) => std::mem::take(&mut *names),
+            Err(_) => return,
+        };
+        let mut named = false;
+        for (link, name) in names {
+            named |= self.spotify.name_if_unnamed(&link, &name);
+        }
+        if named && self.shown == View::Card && self.page == Page::Spotify && !self.animating {
+            self.render();
+        }
+    }
+
     // ----- pointer -----
 
     pub(super) fn pointer_dips(&self, lparam: LPARAM) -> (f32, f32) {
@@ -828,6 +903,9 @@ impl App {
             }
             Page::Focus => PageKind::Focus,
             Page::Water => PageKind::Water,
+            Page::Spotify => PageKind::Spotify {
+                count: self.spotify.items().len().min(SPOTIFY_TILES) as u8,
+            },
             Page::Shelf => PageKind::Shelf {
                 count: self.shelf.items().len().min(SHELF_TILES) as u8,
             },
@@ -853,7 +931,8 @@ impl App {
 
     /// Switches the card to `page`, cancelling the task text box when it leaves Tasks.
     fn show_page(&mut self, page: Page) {
-        if closes_task_input(self.input.is_some(), page) {
+        let input_page = self.input.as_ref().map(|_| self.input_for.page());
+        if closes_input(input_page, page) {
             WindowHandle::new(self.hwnd).post(msg::INPUT_CLOSE, 0, 0);
         }
         self.page = page;
@@ -925,9 +1004,54 @@ impl App {
         (x, y, width, height, s)
     }
 
+    /// Opens the text box under the card for `purpose`, from the message loop.
+    fn ask_input(&mut self, purpose: InputFor) {
+        if self.input.is_none() {
+            self.input_next = Some(purpose);
+            WindowHandle::new(self.hwnd).post(msg::INPUT_OPEN, 0, 0);
+        }
+    }
+
+    /// Whether the box for `purpose` may open now.
+    pub(super) fn can_open_input(&self, purpose: &InputFor) -> bool {
+        match purpose {
+            InputFor::Task => self.can_add_task(),
+            InputFor::SpotifyLink => {
+                self.shown == View::Card && self.page == Page::Spotify && !self.spotify.is_full()
+            }
+            // Asked for right as the link box closed, while the card may be on
+            // its way to closing with it; the name box keeps it open.
+            InputFor::SpotifyName(_) => self.page == Page::Spotify,
+        }
+    }
+
     pub(super) fn on_input_closed(&mut self, text: Option<String>) {
-        if let Some(text) = text {
-            self.tasks.add(&text);
+        let purpose = std::mem::replace(&mut self.input_for, InputFor::Task);
+        match (purpose, text) {
+            (_, None) => {}
+            (InputFor::Task, Some(text)) => {
+                self.tasks.add(&text);
+            }
+            (InputFor::SpotifyLink, Some(text)) => {
+                match new_shortcut(&text, &self.spotify, self.settings.spotify_names) {
+                    NewShortcut::Refused => unsafe {
+                        let _ = MessageBeep(MB_ICONASTERISK);
+                    },
+                    NewShortcut::AddAndLookUp(link) => {
+                        if self.spotify.add(&link, "") {
+                            spotify::look_up_name(
+                                WindowHandle::new(self.hwnd),
+                                link,
+                                self.spotify_names.clone(),
+                            );
+                        }
+                    }
+                    NewShortcut::AskName(link) => self.ask_input(InputFor::SpotifyName(link)),
+                }
+            }
+            (InputFor::SpotifyName(link), Some(name)) => {
+                self.spotify.add(&link, &name);
+            }
         }
         // The pointer has usually moved off the notch to reach the box.
         self.retarget();
@@ -1070,12 +1194,89 @@ mod tests {
     fn leaving_the_tasks_page_should_close_an_open_task_box() {
         assert_eq!(
             [
-                closes_task_input(true, Page::Water),
-                closes_task_input(true, Page::Shelf),
-                closes_task_input(true, Page::Tasks),
-                closes_task_input(false, Page::Water),
+                closes_input(Some(Page::Tasks), Page::Water),
+                closes_input(Some(Page::Tasks), Page::Shelf),
+                closes_input(Some(Page::Tasks), Page::Tasks),
+                closes_input(None, Page::Water),
             ],
             [true, true, false, false]
+        );
+    }
+
+    #[test]
+    fn a_right_click_should_remove_a_shortcut_even_on_its_x() {
+        assert_eq!(
+            [
+                right_click(Some(Button::SpotifyOpen(2))),
+                right_click(Some(Button::SpotifyRemove(2))),
+                right_click(Some(Button::SpotifyAdd)),
+                right_click(Some(Button::ShelfOpen(0))),
+                right_click(None),
+            ],
+            [
+                Some(Button::SpotifyRemove(2)),
+                Some(Button::SpotifyRemove(2)),
+                None,
+                None,
+                None,
+            ]
+        );
+    }
+
+    #[test]
+    fn a_double_click_should_not_reach_the_next_shortcut() {
+        assert!(is_list_click(Some(Button::SpotifyRemove(0))));
+        assert!(is_list_click(Some(Button::SpotifyOpen(0))));
+        assert!(!is_list_click(Some(Button::SpotifyAdd)));
+        assert!(!is_list_click(Some(Button::PlayPause)));
+    }
+
+    #[test]
+    fn the_spotify_box_should_close_off_its_own_page() {
+        assert!(closes_input(Some(Page::Spotify), Page::Tasks));
+        assert!(!closes_input(Some(Page::Spotify), Page::Spotify));
+    }
+
+    const ID: &str = "37i9dQZF1DXcBWIGoYBM5M";
+
+    #[test]
+    fn a_new_link_should_be_named_the_way_the_setting_says() {
+        let list = spotify::Shortcuts::default();
+        let text = format!("https://open.spotify.com/album/{ID}?si=x");
+        let link = spotify::Link::parse(&text);
+        assert!(link.is_some());
+        let link = link.unwrap_or_else(|| unreachable!());
+        assert_eq!(
+            new_shortcut(&text, &list, true),
+            NewShortcut::AddAndLookUp(link.clone())
+        );
+        assert_eq!(
+            new_shortcut(&text, &list, false),
+            NewShortcut::AskName(link)
+        );
+    }
+
+    #[test]
+    fn a_link_already_there_or_a_full_list_should_add_nothing() {
+        let text = format!("spotify:playlist:{ID}");
+        let there = spotify::Link::parse(&text).into_iter().collect::<Vec<_>>();
+        assert_eq!(there.len(), 1);
+        let list = spotify::Shortcuts::unnamed(&there);
+        assert_eq!(new_shortcut(&text, &list, true), NewShortcut::Refused);
+        let others: Vec<spotify::Link> = (0..spotify::MAX_SHORTCUTS)
+            .filter_map(|i| spotify::Link::parse(&format!("spotify:album:{i}{}", &ID[1..])))
+            .collect();
+        assert_eq!(others.len(), spotify::MAX_SHORTCUTS);
+        let full = spotify::Shortcuts::unnamed(&others);
+        assert_eq!(new_shortcut(&text, &full, false), NewShortcut::Refused);
+    }
+
+    #[test]
+    fn text_that_is_not_a_spotify_link_should_add_nothing() {
+        let list = spotify::Shortcuts::default();
+        assert_eq!(
+            new_shortcut("milk and eggs", &list, true),
+            NewShortcut::Refused
         );
     }
 

@@ -2,7 +2,7 @@
 
 ## Network
 
-BUKU makes exactly one kind of network request: looking up lyrics on
+BUKU makes two kinds of network request. The first is looking up lyrics on
 `lrclib.net` when a new track starts playing. The request contains:
 
 - track title
@@ -18,8 +18,19 @@ disk: it bypasses Windows' web cache, sends and stores no cookies, and follows
 no redirects. **Clear cache** in Settings removes any `lrclib.net` entries
 that are in that cache all the same, and nothing else. Windows can keep traces
 in the cache database's own log files until it replaces them. Turn off
-**Download lyrics** in Settings and BUKU makes no network
-requests at all.
+**Download lyrics** in Settings and BUKU makes no lyrics requests.
+
+The second is asking Spotify for the name of a Spotify shortcut, once, when
+you add one on the Spotify page and **Name Spotify shortcuts** is on. The
+request goes to Spotify's public oEmbed endpoint
+(`https://open.spotify.com/oembed`) and contains only the link you added,
+without its tracking part (`?si=...`). It signs in to nothing, keeps nothing
+on disk and carries the same `User-Agent` header. Turn that setting off and
+BUKU asks you for the name instead and never contacts Spotify.
+
+With both settings off, BUKU makes no network requests at all. Opening a
+shortcut hands its link to the Spotify app (or to your browser when the app
+isn't installed); BUKU itself sends nothing then.
 
 ## Keyboard
 
@@ -51,6 +62,9 @@ Normal removes the hook.
 - Settings, the day's water count and your tasks are stored in `%APPDATA%\BUKU\`
   (`settings.json`, `water.json`, `tasks.json`, `shelf.json`) and never leave
   your computer. The Shelf stores file locations only, never file contents.
+- Spotify shortcuts are stored in `%APPDATA%\BUKU\spotify.json`: for each,
+  its kind (playlist, album, song, artist, podcast or episode), its Spotify id
+  and its name. Nothing about your Spotify account is known or kept.
 - Lyric timings you set on the media card are stored in
   `%APPDATA%\BUKU\lyric_sync.json` as a hash of each song's title, artist and length
   with its offset, never the song's name, and never leave your computer.

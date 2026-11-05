@@ -16,7 +16,7 @@ pub const CARD_H: f32 = 188.0;
 
 const TAB_Y: f32 = 152.0;
 const TAB_H: f32 = 24.0;
-const TAB_W: f32 = 72.0;
+const TAB_W: f32 = 64.0;
 const TAB_GAP: f32 = 6.0;
 const BUTTON_RADIUS: f32 = 18.0;
 const BIG_BUTTON_RADIUS: f32 = 22.0;
@@ -44,14 +44,16 @@ pub enum Page {
     Water,
     Tasks,
     Shelf,
+    Spotify,
 }
 
-const PAGES: [(Page, &str); 5] = [
+const PAGES: [(Page, &str); 6] = [
     (Page::Music, "Music"),
     (Page::Focus, "Focus"),
     (Page::Water, "Water"),
     (Page::Tasks, "Tasks"),
     (Page::Shelf, "Shelf"),
+    (Page::Spotify, "Spotify"),
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -87,6 +89,10 @@ pub enum Button {
     ShelfOpen(u8),
     ShelfRemove(u8),
     ShelfClear,
+    /// A Spotify shortcut, by its position on the card.
+    SpotifyOpen(u8),
+    SpotifyRemove(u8),
+    SpotifyAdd,
 }
 
 pub struct MediaCard<'a> {
@@ -135,6 +141,14 @@ pub struct ShelfCard<'a> {
     pub dragging: bool,
 }
 
+/// Spotify shortcuts on their page: three rows of three, Add in the next free spot.
+pub const SPOTIFY_TILES: usize = 8;
+
+pub struct SpotifyCard<'a> {
+    /// The shortcuts' names, at most `SPOTIFY_TILES`.
+    pub names: Vec<&'a str>,
+}
+
 pub struct WaterCard {
     pub glasses: u32,
     pub goal: u32,
@@ -151,6 +165,7 @@ pub enum PageBody<'a> {
     Water(WaterCard),
     Tasks(TasksCard<'a>),
     Shelf(ShelfCard<'a>),
+    Spotify(SpotifyCard<'a>),
 }
 
 pub struct Card<'a> {
@@ -182,6 +197,9 @@ pub enum PageKind {
         can_add: bool,
     },
     Shelf {
+        count: u8,
+    },
+    Spotify {
         count: u8,
     },
 }
@@ -255,6 +273,35 @@ const TILE_H: f32 = 84.0;
 fn tile_x(index: usize) -> f32 {
     let row_w = SHELF_TILES as f32 * TILE_W + (SHELF_TILES - 1) as f32 * TILE_GAP;
     (CARD_W - row_w) / 2.0 + index as f32 * (TILE_W + TILE_GAP)
+}
+
+// Spotify shortcuts: a 3 x 3 grid above the tabs, clear of the pin.
+const SPOT_COLUMNS: usize = 3;
+const SPOT_LEFT: f32 = 20.0;
+const SPOT_RIGHT: f32 = 22.0;
+const SPOT_TOP: f32 = 12.0;
+const SPOT_H: f32 = 38.0;
+const SPOT_GAP_X: f32 = 8.0;
+const SPOT_GAP_Y: f32 = 6.0;
+const SPOT_REMOVE_R: f32 = 8.0;
+
+/// Left, top, width and height of the Spotify tile at `index`.
+fn spot_rect(index: usize) -> (f32, f32, f32, f32) {
+    let columns = SPOT_COLUMNS as f32;
+    let w = (CARD_W - SPOT_LEFT - SPOT_RIGHT - (columns - 1.0) * SPOT_GAP_X) / columns;
+    let (row, column) = (index / SPOT_COLUMNS, index % SPOT_COLUMNS);
+    (
+        SPOT_LEFT + column as f32 * (w + SPOT_GAP_X),
+        SPOT_TOP + row as f32 * (SPOT_H + SPOT_GAP_Y),
+        w,
+        SPOT_H,
+    )
+}
+
+/// Center of a Spotify tile's remove button, in its top right corner.
+fn spot_remove_center(index: usize) -> (f32, f32) {
+    let (x, y, w, _) = spot_rect(index);
+    (x + w - 10.0, y + 10.0)
 }
 
 fn task_row_y(row: usize) -> f32 {
@@ -467,6 +514,29 @@ fn hits(kind: PageKind, width: f32) -> Vec<(Button, Hit)> {
                 ));
             }
         }
+        PageKind::Spotify { count } => {
+            let count = usize::from(count).min(SPOTIFY_TILES);
+            // The remove buttons sit on the tiles, so they're tested first.
+            for index in 0..count {
+                let (cx, cy) = spot_remove_center(index);
+                hits.push((
+                    Button::SpotifyRemove(index as u8),
+                    Hit::Circle {
+                        cx,
+                        cy,
+                        r: SPOT_REMOVE_R,
+                    },
+                ));
+            }
+            for index in 0..count {
+                let (x, y, w, h) = spot_rect(index);
+                hits.push((Button::SpotifyOpen(index as u8), Hit::Rect { x, y, w, h }));
+            }
+            if count < SPOTIFY_TILES {
+                let (x, y, w, h) = spot_rect(count);
+                hits.push((Button::SpotifyAdd, Hit::Rect { x, y, w, h }));
+            }
+        }
     }
     hits
 }
@@ -489,6 +559,7 @@ impl Painter<'_> {
             PageBody::Water(water) => self.water(water, card.hot),
             PageBody::Tasks(tasks) => self.tasks(tasks, card.hot),
             PageBody::Shelf(shelf) => self.shelf(shelf, card.hot),
+            PageBody::Spotify(spotify) => self.spotify(spotify, card.hot),
         }
         self.tabs(card.page, card.hot);
         self.pin(card.pinned, card.hot);
@@ -995,6 +1066,97 @@ impl Painter<'_> {
         }
     }
 
+    fn spotify(&self, card: &SpotifyCard, hot: Option<Button>) {
+        let fonts = &self.gfx.fonts;
+        let count = card.names.len().min(SPOTIFY_TILES);
+        for (index, name) in card.names.iter().enumerate().take(SPOTIFY_TILES) {
+            let (x, y, w, h) = spot_rect(index);
+            let tile = index as u8;
+            let tile_hot =
+                matches!(hot, Some(Button::SpotifyOpen(i) | Button::SpotifyRemove(i)) if i == tile);
+            let fill = if tile_hot {
+                rgba(1.0, 1.0, 1.0, 0.16)
+            } else {
+                rgba(1.0, 1.0, 1.0, 0.08)
+            };
+            self.rounded(x, y, w, h, 10.0, fill);
+            self.text(
+                GLYPH_MUSIC,
+                &fonts.icon_small,
+                x + 10.0,
+                y + (h - 16.0) / 2.0,
+                16.0,
+                16.0,
+                accent::current(),
+            );
+            // The name stops short of the remove button that shows on hover.
+            let right = if tile_hot { 26.0 } else { 8.0 };
+            self.text(
+                name,
+                &fonts.small,
+                x + 32.0,
+                y + (h - 18.0) / 2.0,
+                w - 32.0 - right,
+                18.0,
+                TEXT,
+            );
+            if tile_hot {
+                let (cx, cy) = spot_remove_center(index);
+                let remove_hot = hot == Some(Button::SpotifyRemove(tile));
+                self.circle(
+                    cx,
+                    cy,
+                    SPOT_REMOVE_R,
+                    if remove_hot {
+                        rgba(1.0, 1.0, 1.0, 0.30)
+                    } else {
+                        rgba(1.0, 1.0, 1.0, 0.16)
+                    },
+                );
+                self.text(
+                    GLYPH_CLOSE,
+                    &fonts.icon_small,
+                    cx - 9.0,
+                    cy - 9.0,
+                    18.0,
+                    18.0,
+                    TEXT,
+                );
+            }
+        }
+        if count < SPOTIFY_TILES {
+            let (x, y, w, h) = spot_rect(count);
+            let fill = if hot == Some(Button::SpotifyAdd) {
+                rgba(1.0, 1.0, 1.0, 0.16)
+            } else {
+                rgba(1.0, 1.0, 1.0, 0.05)
+            };
+            self.rounded(x, y, w, h, 10.0, fill);
+            self.aligned(
+                "+  Add",
+                &fonts.small,
+                x,
+                y + (h - 18.0) / 2.0,
+                w,
+                18.0,
+                accent::current(),
+                DWRITE_TEXT_ALIGNMENT_CENTER,
+            );
+        }
+        if count == 0 {
+            self.aligned(
+                "In Spotify: Share, Copy link. Then Add it here",
+                &fonts.small,
+                20.0,
+                SPOT_TOP + SPOT_H + 26.0,
+                self.width - 40.0,
+                18.0,
+                TEXT_DIM,
+                DWRITE_TEXT_ALIGNMENT_CENTER,
+            );
+        }
+    }
+
     fn shelf(&self, card: &ShelfCard, hot: Option<Button>) {
         let fonts = &self.gfx.fonts;
         let w = self.width;
@@ -1293,7 +1455,7 @@ mod pin_tests {
             .map(|(button, _)| button)
     }
 
-    const KINDS: [PageKind; 6] = [
+    const KINDS: [PageKind; 7] = [
         PageKind::Music {
             lyrics: true,
             offset: true,
@@ -1308,6 +1470,7 @@ mod pin_tests {
             can_add: true,
         },
         PageKind::Shelf { count: 6 },
+        PageKind::Spotify { count: 8 },
     ];
 
     #[test]
@@ -1333,13 +1496,70 @@ mod pin_tests {
                     TILE_Y + 9.0
                 ),
                 at(KINDS[2], w - 52.0, 50.0),
+                {
+                    let (cx, cy) = spot_remove_center(2);
+                    at(KINDS[6], cx, cy)
+                },
             ],
             [
                 Some(Button::Next),
                 Some(Button::TaskDelete(0)),
                 Some(Button::ShelfRemove(SHELF_TILES as u8 - 1)),
                 Some(Button::FocusReset),
+                Some(Button::SpotifyRemove(2)),
             ]
         );
+    }
+}
+
+#[cfg(test)]
+mod spotify_tests {
+    use super::*;
+
+    fn at(count: u8, x: f32, y: f32) -> Option<Button> {
+        hits(PageKind::Spotify { count }, CARD_W)
+            .into_iter()
+            .find(|(_, hit)| hit.contains(x, y))
+            .map(|(button, _)| button)
+    }
+
+    fn center(index: usize) -> (f32, f32) {
+        let (x, y, w, h) = spot_rect(index);
+        (x + w / 2.0, y + h / 2.0)
+    }
+
+    #[test]
+    fn the_grid_should_fit_above_the_tabs_and_inside_the_card() {
+        let (x, y, w, h) = spot_rect(SPOTIFY_TILES);
+        assert!(y + h < TAB_Y);
+        assert!(x + w <= CARD_W - SPOT_RIGHT + 0.01);
+        let (left, top, _, _) = spot_rect(0);
+        assert!(left >= SPOT_LEFT && top >= SPOT_TOP);
+    }
+
+    #[test]
+    fn each_tile_should_open_its_own_shortcut() {
+        for index in 0..SPOTIFY_TILES {
+            let (x, y) = center(index);
+            assert_eq!(at(8, x, y), Some(Button::SpotifyOpen(index as u8)));
+        }
+    }
+
+    #[test]
+    fn add_should_sit_in_the_first_free_spot_and_go_once_full() {
+        let (x, y) = center(3);
+        assert_eq!(at(3, x, y), Some(Button::SpotifyAdd));
+        let (x, y) = center(0);
+        assert_eq!(at(0, x, y), Some(Button::SpotifyAdd));
+        let found = hits(PageKind::Spotify { count: 8 }, CARD_W)
+            .iter()
+            .any(|(button, _)| *button == Button::SpotifyAdd);
+        assert!(!found);
+    }
+
+    #[test]
+    fn six_tabs_should_fit_the_card() {
+        let right = tabs_left() + PAGES.len() as f32 * (TAB_W + TAB_GAP) - TAB_GAP;
+        assert!(tabs_left() >= 10.0 && right <= CARD_W - 10.0);
     }
 }

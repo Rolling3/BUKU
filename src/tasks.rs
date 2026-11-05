@@ -111,21 +111,48 @@ impl TaskList {
     }
 }
 
-/// Control characters and the bidi embedding, override and isolate controls, which
-/// can reorder or hide text. The joiners U+200C and U+200D stay: Arabic and Persian need them.
+/// Control characters, the bidi marks, embedding, override and isolate controls,
+/// which can reorder text, and characters that show nothing at all (zero-width
+/// space, word joiner, byte order mark, blank braille, Hangul fillers, tags),
+/// which can make text look empty. The joiners U+200C and U+200D stay: Arabic
+/// and Persian need them.
 fn is_unwanted(c: char) -> bool {
-    c.is_control() || matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+    c.is_control()
+        || matches!(
+            c,
+            '\u{061C}'
+                | '\u{115F}'
+                | '\u{1160}'
+                | '\u{180E}'
+                | '\u{200B}'
+                | '\u{200E}'
+                | '\u{200F}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2060}'..='\u{2064}'
+                | '\u{2066}'..='\u{2069}'
+                | '\u{2800}'
+                | '\u{3164}'
+                | '\u{FEFF}'
+                | '\u{FFA0}'
+                | '\u{E0000}'..='\u{E007F}'
+        )
 }
 
 /// One line, single spaces, at most `MAX_TASK_CHARS` characters.
 fn clean_text(text: &str) -> String {
+    clean_line(text, MAX_TASK_CHARS)
+}
+
+/// One line, single spaces, at most `max_chars` characters, without control or
+/// direction characters. Spotify shortcut names follow the same rules.
+pub fn clean_line(text: &str, max_chars: usize) -> String {
     // Whitespace controls (tab, newline) must still separate words, so they are kept for the split.
     let text: String = text
         .chars()
         .filter(|&c| c.is_whitespace() || !is_unwanted(c))
         .collect();
     let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let capped: String = text.chars().take(MAX_TASK_CHARS).collect();
+    let capped: String = text.chars().take(max_chars).collect();
     // The cut can land just after a space.
     capped.trim_end().to_owned()
 }
@@ -171,6 +198,15 @@ mod sanitize_tests {
     fn clean_text_should_drop_control_and_bidi_characters() {
         let cleaned = clean_text("a\u{0}b\u{7}c \u{202E}d\u{2066}e\u{2069}f\u{1b}g");
         assert_eq!(cleaned, "abc defg");
+    }
+
+    #[test]
+    fn text_that_shows_nothing_should_clean_to_nothing() {
+        assert_eq!(
+            clean_text("\u{2800}\u{200B}\u{200F}\u{FEFF}\u{3164}\u{E0041}\u{2060}"),
+            ""
+        );
+        assert_eq!(clean_text("a\u{200E}b\u{061C}c"), "abc");
     }
 
     #[test]

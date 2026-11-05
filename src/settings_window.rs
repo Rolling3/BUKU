@@ -57,7 +57,7 @@ const WM_MOUSELEAVE: u32 = 0x02A3;
 const GFX_RETRY: Duration = Duration::from_secs(1);
 
 const WIDTH: f32 = 460.0;
-const HEIGHT: f32 = 848.0;
+const HEIGHT: f32 = 894.0;
 const PAD: f32 = 28.0;
 const TOP: f32 = 24.0;
 const ROW_H: f32 = 46.0;
@@ -77,6 +77,7 @@ enum Switch {
     WaterReminders,
     ShowOverFullscreen,
     AutoHide,
+    SpotifyNames,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -117,7 +118,7 @@ enum Row {
     Accent,
 }
 
-const ROWS: [Row; 16] = [
+const ROWS: [Row; 17] = [
     Row::Section("General"),
     Row::Switch(
         Switch::Autostart,
@@ -146,9 +147,14 @@ const ROWS: [Row; 16] = [
     Row::Switch(
         Switch::FetchLyrics,
         "Download lyrics",
-        "From lrclib.net. Off means no network use",
+        "Look them up on lrclib.net",
     ),
     Row::Number(Number::LyricsEarly, "Show lyrics early by"),
+    Row::Switch(
+        Switch::SpotifyNames,
+        "Name Spotify shortcuts",
+        "Ask Spotify for the name, or type one yourself",
+    ),
     Row::Section("Focus and water"),
     Row::Number(Number::FocusMinutes, "Focus length"),
     Row::Number(Number::BreakMinutes, "Break length"),
@@ -823,6 +829,7 @@ impl State {
                     Switch::WaterReminders => &mut self.settings.water_reminders,
                     Switch::ShowOverFullscreen => &mut self.settings.show_over_fullscreen,
                     Switch::AutoHide => &mut self.settings.auto_hide,
+                    Switch::SpotifyNames => &mut self.settings.spotify_names,
                     Switch::Autostart => unreachable!("handled above"),
                 };
                 *flag = !*flag;
@@ -1048,6 +1055,7 @@ impl State {
                         Switch::WaterReminders => self.settings.water_reminders,
                         Switch::ShowOverFullscreen => self.settings.show_over_fullscreen,
                         Switch::AutoHide => self.settings.auto_hide,
+                        Switch::SpotifyNames => self.settings.spotify_names,
                     };
                     p.switch(WIDTH - PAD - 44.0, top + ROW_H / 2.0 - 11.0, on);
                 }

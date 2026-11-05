@@ -99,11 +99,7 @@ pub fn fetch(query: &Query) -> Result<Lyrics> {
     if query.title.trim().is_empty() {
         return Ok(Lyrics::NotFound);
     }
-    let client = HttpClient::Create(&private_filter()?)?;
-    client
-        .DefaultRequestHeaders()?
-        .UserAgent()?
-        .TryParseAdd(&HSTRING::from(USER_AGENT))?;
+    let client = private_client()?;
 
     // A decorated title or channel name (brackets, "- Topic", "Artist - Song")
     // is looked up cleaned first, since that is where songs are found. Then, for
@@ -230,6 +226,22 @@ fn private_filter() -> Result<HttpBaseProtocolFilter> {
     filter.SetAllowAutoRedirect(false)?;
     filter.SetAllowUI(false)?;
     Ok(filter)
+}
+
+/// A client with `private_filter`'s settings and BUKU's user agent; the Spotify
+/// name lookup uses it too.
+pub(crate) fn private_client() -> Result<HttpClient> {
+    let client = HttpClient::Create(&private_filter()?)?;
+    client
+        .DefaultRequestHeaders()?
+        .UserAgent()?
+        .TryParseAdd(&HSTRING::from(USER_AGENT))?;
+    Ok(client)
+}
+
+/// A GET with the lyrics lookups' limits on time and size. `Ok(None)` for 404.
+pub(crate) fn get_text(client: &HttpClient, url: &str) -> Result<Option<String>> {
+    get(client, url, Busy::Retry)
 }
 
 /// A response body read as JSON. A body that is not JSON (a proxy's or a
@@ -437,7 +449,7 @@ fn pick_best(records: Vec<Record>, duration_secs: Option<u32>, strict: bool) -> 
     unknown_duration.or(synced_any).unwrap_or(fallback)
 }
 
-fn escape(text: &str) -> Result<String> {
+pub(crate) fn escape(text: &str) -> Result<String> {
     Ok(Uri::EscapeComponent(&HSTRING::from(text))?.to_string())
 }
 

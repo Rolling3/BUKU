@@ -1,4 +1,4 @@
-//! The small text box for adding a task.
+//! The small text box for adding a task or a Spotify shortcut.
 //!
 //! The notch never takes keyboard focus, so typing happens in this separate
 //! window. It exists only while the user is adding a task, takes focus for that
@@ -26,10 +26,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WINDOW_STYLE, WM_ACTIVATE, WM_CHAR, WM_CTLCOLOREDIT, WM_KEYDOWN, WM_SETFONT, WNDCLASSEXW,
     WS_CHILD, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
 };
-use windows::core::{Result, w};
+use windows::core::{HSTRING, Result, w};
 
 use crate::msg::{self, WindowHandle};
-use crate::tasks::MAX_TASK_CHARS;
 
 const CLASS: windows::core::PCWSTR = w!("BUKU.TaskInput");
 const EM_LIMITTEXT: u32 = 0x00C5;
@@ -75,7 +74,22 @@ pub struct TaskInput {
 
 impl TaskInput {
     /// Opens the box at (`x`, `y`) in screen pixels and gives it keyboard focus.
-    pub fn open(notch: HWND, x: i32, y: i32, width: i32, height: i32, scale: f32) -> Result<Self> {
+    /// `hint` shows while it's empty; it takes at most `limit` characters.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "owner, place, size, scale and what the box is for"
+    )]
+    pub fn open(
+        notch: HWND,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        scale: f32,
+        hint: &str,
+        limit: usize,
+    ) -> Result<Self> {
+        let hint = HSTRING::from(hint);
         if !register_class() {
             return Err(windows::core::Error::from_thread());
         }
@@ -84,7 +98,7 @@ impl TaskInput {
             let hwnd = CreateWindowExW(
                 WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
                 CLASS,
-                w!("New task"),
+                &hint,
                 WS_POPUP | WS_VISIBLE,
                 x,
                 y,
@@ -157,12 +171,12 @@ impl TaskInput {
                 Some(WPARAM(font.0 as usize)),
                 Some(LPARAM(1)),
             );
-            SendMessageW(edit, EM_LIMITTEXT, Some(WPARAM(MAX_TASK_CHARS)), None);
+            SendMessageW(edit, EM_LIMITTEXT, Some(WPARAM(limit)), None);
             SendMessageW(
                 edit,
                 EM_SETCUEBANNER,
                 Some(WPARAM(1)),
-                Some(LPARAM(w!("New task").as_ptr() as isize)),
+                Some(LPARAM(hint.as_ptr() as isize)),
             );
             let _ = SetWindowSubclass(edit, Some(edit_proc), 1, notch.0 as usize);
 

@@ -20,7 +20,7 @@ pub const LYRICS_EARLY_MS: (u32, u32) = (0, 3_000);
 pub struct Settings {
     /// Show the current lyric line inside the collapsed notch while music plays.
     pub lyrics_in_notch: bool,
-    /// Fetch lyrics from lrclib.net. Off means BUKU makes no network requests at all.
+    /// Fetch lyrics from lrclib.net. Off means BUKU makes no lyrics requests.
     pub fetch_lyrics: bool,
     /// How long before its time each lyric line shows.
     pub lyrics_early_ms: u32,
@@ -43,6 +43,9 @@ pub struct Settings {
     /// Keep the notch out of sight until the pointer touches the top of the
     /// screen where it sits, like an auto-hiding taskbar.
     pub auto_hide: bool,
+    /// Ask Spotify for the name of a shortcut as it's added. Off, BUKU asks
+    /// for a name instead and Spotify is never contacted.
+    pub spotify_names: bool,
     /// The highlight colour of the notch and Settings.
     pub accent: Accent,
 }
@@ -62,6 +65,7 @@ impl Default for Settings {
             screen: String::new(),
             show_over_fullscreen: false,
             auto_hide: false,
+            spotify_names: true,
             accent: Accent::White,
         }
     }
@@ -100,6 +104,7 @@ impl<'de> Deserialize<'de> for Settings {
                 .map_or(defaults.screen, str::to_owned),
             show_over_fullscreen: flag("show_over_fullscreen", defaults.show_over_fullscreen),
             auto_hide: flag("auto_hide", defaults.auto_hide),
+            spotify_names: flag("spotify_names", defaults.spotify_names),
             accent: field("accent")
                 .and_then(|accent| serde_json::from_value(accent.clone()).ok())
                 .unwrap_or(defaults.accent),
@@ -282,6 +287,7 @@ mod tests {
             screen: r"\\.\DISPLAY2".into(),
             show_over_fullscreen: true,
             auto_hide: true,
+            spotify_names: false,
             accent: Accent::Purple,
         };
         let json = serde_json::to_string(&saved).unwrap_or_default();
