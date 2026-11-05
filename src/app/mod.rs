@@ -149,6 +149,9 @@ enum View {
     Hud,
     /// The hover card with its Music, Focus and Water pages.
     Card,
+    /// Nothing at all: "Automatically hide BUKU" is on and the card isn't open.
+    /// A strip along the top edge still catches the pointer.
+    Hidden,
 }
 
 struct App {
@@ -451,6 +454,12 @@ impl App {
         let fetch_lyrics = Arc::new(AtomicBool::new(settings.fetch_lyrics));
         let window = WindowHandle::new(hwnd);
         let scale = unsafe { GetDpiForWindow(hwnd) }.max(96) as f32 / 96.0;
+        // Out of sight from the first frame, not after a slide up.
+        let (shown, height) = if settings.auto_hide {
+            (View::Hidden, 0.0)
+        } else {
+            (View::Collapsed, draw::COLLAPSED_H)
+        };
 
         let mut app = Self {
             hwnd,
@@ -471,9 +480,9 @@ impl App {
             taskbar_created: unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) },
             tray_icon: tray::load_icon(unsafe { GetDpiForWindow(hwnd) }),
             width: Spring::new(draw::COLLAPSED_W),
-            height: Spring::new(draw::COLLAPSED_H),
+            height: Spring::new(height),
             content: Fade::new(1.0, 0.09),
-            shown: View::Collapsed,
+            shown,
             animating: false,
             last_frame: Instant::now(),
             hud: None,
@@ -664,7 +673,7 @@ impl App {
                 if self.pressed == Some(Button::Volume) {
                     self.begin_volume_drag(lparam);
                 }
-                if self.shown == View::Collapsed {
+                if matches!(self.shown, View::Collapsed | View::Hidden) {
                     self.set_hover(true);
                 }
             }
@@ -747,7 +756,9 @@ impl App {
             TIMER_LYRIC => {
                 let before = self.lyric_index;
                 self.schedule_lyric();
-                if self.lyric_index != before {
+                // Out of sight there is nothing to redraw; the line is read
+                // afresh when the notch shows again.
+                if self.lyric_index != before && self.shown != View::Hidden {
                     // The new line shows at once; the notch resizes around it.
                     self.retarget();
                     if !self.animating {

@@ -9,6 +9,12 @@ fn replaces_hud(notice_showing: bool, new_is_notice: bool, card_open: bool) -> b
     !(notice_showing && !new_is_notice && card_open)
 }
 
+/// Whether a pop-up or notice is dropped: with "Automatically hide BUKU" on
+/// and the card closed, the notch shows nothing, and nothing waits to show.
+fn dropped_while_hidden(auto_hide: bool, card_open: bool) -> bool {
+    auto_hide && !card_open
+}
+
 /// Whether moving to `page` must close the task text box: it belongs to the
 /// Tasks page, and staying open under another page would add a task unseen.
 fn closes_task_input(input_open: bool, page: Page) -> bool {
@@ -95,6 +101,11 @@ impl App {
     pub(super) fn show_hud(&mut self, hud: Hud) {
         let is_notice = |hud: &Hud| matches!(hud, Hud::Pomodoro { .. } | Hud::Water { .. });
         let card_open = self.hover || self.pinned || self.input.is_some() || self.drag_over;
+        // Hidden, nothing pops up; kept for later, a notice would show in place
+        // of the card the moment the pointer brings it out.
+        if dropped_while_hidden(self.settings.auto_hide, card_open) {
+            return;
+        }
         let notice_showing = self.hud.as_ref().is_some_and(is_notice);
         if !replaces_hud(notice_showing, is_notice(&hud), card_open) {
             return;
@@ -734,7 +745,7 @@ impl App {
         let visible = match self.shown {
             View::Collapsed => true,
             View::Card => self.page == Page::Focus,
-            View::Hud => false,
+            View::Hud | View::Hidden => false,
         } && !self.fullscreen;
         if visible && !self.animating {
             self.render();
@@ -1046,6 +1057,13 @@ mod tests {
             ],
             [false, true, true, true]
         );
+    }
+
+    #[test]
+    fn a_pop_up_should_be_dropped_only_while_hidden() {
+        assert!(dropped_while_hidden(true, false));
+        assert!(!dropped_while_hidden(true, true));
+        assert!(!dropped_while_hidden(false, false));
     }
 
     #[test]

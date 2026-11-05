@@ -57,7 +57,7 @@ const WM_MOUSELEAVE: u32 = 0x02A3;
 const GFX_RETRY: Duration = Duration::from_secs(1);
 
 const WIDTH: f32 = 460.0;
-const HEIGHT: f32 = 802.0;
+const HEIGHT: f32 = 848.0;
 const PAD: f32 = 28.0;
 const TOP: f32 = 24.0;
 const ROW_H: f32 = 46.0;
@@ -76,6 +76,7 @@ enum Switch {
     FetchLyrics,
     WaterReminders,
     ShowOverFullscreen,
+    AutoHide,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -116,7 +117,7 @@ enum Row {
     Accent,
 }
 
-const ROWS: [Row; 15] = [
+const ROWS: [Row; 16] = [
     Row::Section("General"),
     Row::Switch(
         Switch::Autostart,
@@ -129,6 +130,11 @@ const ROWS: [Row; 15] = [
         Switch::ShowOverFullscreen,
         "Show over full screen",
         "Stay on top of full-screen videos and games",
+    ),
+    Row::Switch(
+        Switch::AutoHide,
+        "Automatically hide BUKU",
+        "Show it only when the pointer touches the top",
     ),
     Row::Accent,
     Row::Section("Music"),
@@ -816,6 +822,7 @@ impl State {
                     Switch::FetchLyrics => &mut self.settings.fetch_lyrics,
                     Switch::WaterReminders => &mut self.settings.water_reminders,
                     Switch::ShowOverFullscreen => &mut self.settings.show_over_fullscreen,
+                    Switch::AutoHide => &mut self.settings.auto_hide,
                     Switch::Autostart => unreachable!("handled above"),
                 };
                 *flag = !*flag;
@@ -1040,6 +1047,7 @@ impl State {
                         Switch::FetchLyrics => self.settings.fetch_lyrics,
                         Switch::WaterReminders => self.settings.water_reminders,
                         Switch::ShowOverFullscreen => self.settings.show_over_fullscreen,
+                        Switch::AutoHide => self.settings.auto_hide,
                     };
                     p.switch(WIDTH - PAD - 44.0, top + ROW_H / 2.0 - 11.0, on);
                 }

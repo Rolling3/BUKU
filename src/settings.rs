@@ -40,6 +40,9 @@ pub struct Settings {
     /// Keep the notch on screen over full-screen videos and games instead of
     /// hiding it.
     pub show_over_fullscreen: bool,
+    /// Keep the notch out of sight until the pointer touches the top of the
+    /// screen where it sits, like an auto-hiding taskbar.
+    pub auto_hide: bool,
     /// The highlight colour of the notch and Settings.
     pub accent: Accent,
 }
@@ -58,6 +61,7 @@ impl Default for Settings {
             caps_custom: Vec::new(),
             screen: String::new(),
             show_over_fullscreen: false,
+            auto_hide: false,
             accent: Accent::White,
         }
     }
@@ -95,6 +99,7 @@ impl<'de> Deserialize<'de> for Settings {
                 .filter(|name| name.len() <= 64)
                 .map_or(defaults.screen, str::to_owned),
             show_over_fullscreen: flag("show_over_fullscreen", defaults.show_over_fullscreen),
+            auto_hide: flag("auto_hide", defaults.auto_hide),
             accent: field("accent")
                 .and_then(|accent| serde_json::from_value(accent.clone()).ok())
                 .unwrap_or(defaults.accent),
@@ -276,6 +281,7 @@ mod tests {
             caps_custom: vec![0xA2, 0xA4, 0x4B],
             screen: r"\\.\DISPLAY2".into(),
             show_over_fullscreen: true,
+            auto_hide: true,
             accent: Accent::Purple,
         };
         let json = serde_json::to_string(&saved).unwrap_or_default();

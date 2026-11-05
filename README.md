@@ -82,6 +82,7 @@ Changes apply at once; there is no Save button.
 | Caps Lock key | **Normal**; **Ctrl+Shift+L**, sent once per press; or **Custom**, any key or combination you record. |
 | Notch screen | The screen the notch sits on, when more than one is connected. |
 | Show over full screen | Keeps the notch on top of full-screen videos and games instead of hiding it. |
+| Automatically hide BUKU | Hides the notch completely, like an auto-hiding taskbar. Push the pointer against the top of the screen where the notch sits to open it. Nothing shows while it's hidden: no lyrics, countdown or pop-ups. |
 | Accent colour | The colour of switches, the music bars and highlights: white (the default), yellow, orange, red, pink, purple, blue, cyan or green. |
 | Lyrics in the notch | Shows the current line inside the notch while music plays. |
 | Download lyrics | Looks lyrics up on lrclib.net. Off means BUKU makes no network requests at all. |

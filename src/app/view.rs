@@ -62,7 +62,7 @@ impl App {
         let bounds = (
             (left * s).floor() as i32,
             (right * s).ceil() as i32,
-            (bottom * s).ceil() as i32,
+            region_bottom(bottom, s),
         );
         // Setting a region makes Windows recalculate the frame, so skip identical ones.
         if self.region == Some(bounds) {
@@ -82,7 +82,13 @@ impl App {
         let notice = matches!(self.hud, Some(Hud::Pomodoro { .. } | Hud::Water { .. }));
         // The card stays open while the task text box is, even with the pointer on the box.
         let open = self.hover || self.input.is_some() || self.drag_over;
-        view_for(open, self.pinned, notice, self.hud.is_some())
+        view_for(
+            open,
+            self.pinned,
+            notice,
+            self.hud.is_some(),
+            self.settings.auto_hide,
+        )
     }
 
     pub(super) fn size_of(&self, view: View) -> (f32, f32) {
@@ -96,6 +102,8 @@ impl App {
                 draw::HUD_H,
             ),
             View::Card => (draw::CARD_W, draw::CARD_H),
+            // Slides up out of sight: no height, the collapsed notch's width.
+            View::Hidden => (draw::COLLAPSED_W, 0.0),
         }
     }
 
@@ -247,7 +255,7 @@ impl App {
                 timer: timer.as_deref(),
                 beat: self.started.elapsed().as_secs_f32() % EQUALIZER_LOOP_SECS,
             },
-            View::Collapsed => Content::Empty,
+            View::Collapsed | View::Hidden => Content::Empty,
             View::Hud => self.shown_hud.clone().map_or(Content::Empty, Content::Hud),
             View::Card => {
                 let body = match (self.page, &state.track) {
@@ -324,7 +332,8 @@ impl App {
         let scene = Scene {
             width: self.width.value,
             target_width: self.width.target,
-            height: self.height.value,
+            // The spring overshoots a little on its way to no height at all.
+            height: self.height.value.max(0.0),
             content_alpha: crate::anim::ease_out(self.content.value),
             content,
         };
@@ -456,9 +465,13 @@ mod shelf_icon_tests {
 
 /// What the notch shows: the card while it's open (hovered, pinned, typing into
 /// it or taking a drop) unless a notice is due, else a pop-up, else nothing.
-fn view_for(open: bool, pinned: bool, notice: bool, hud: bool) -> View {
-    if (open || pinned) && !notice {
+/// With `auto_hide`, a closed notch shows nothing at all, pop-ups included.
+fn view_for(open: bool, pinned: bool, notice: bool, hud: bool, auto_hide: bool) -> View {
+    let open = open || pinned;
+    if open && !notice {
         View::Card
+    } else if auto_hide && !open {
+        View::Hidden
     } else if hud {
         View::Hud
     } else {
@@ -466,23 +479,61 @@ fn view_for(open: bool, pinned: bool, notice: bool, hud: bool) -> View {
     }
 }
 
+/// How tall the window's clickable area is, in pixels, for a notch `bottom`
+/// DIPs tall. Never less than a thin strip at the top edge, so a hidden notch
+/// still notices the pointer pushed against the top of the screen.
+fn region_bottom(bottom: f32, scale: f32) -> i32 {
+    let strip = (EDGE_STRIP * scale).ceil() as i32;
+    ((bottom * scale).ceil() as i32).max(strip)
+}
+
+/// The strip a hidden notch keeps along the top edge, in DIPs.
+const EDGE_STRIP: f32 = 2.0;
+
 #[cfg(test)]
 mod pinned_card_tests {
     use super::*;
 
     #[test]
     fn a_pinned_card_should_stay_open_without_the_pointer() {
-        assert_eq!(view_for(false, true, false, false), View::Card);
-        assert_eq!(view_for(false, false, false, false), View::Collapsed);
+        assert_eq!(view_for(false, true, false, false, false), View::Card);
+        assert_eq!(view_for(false, false, false, false, false), View::Collapsed);
     }
 
     #[test]
     fn a_notice_should_still_show_over_a_pinned_card() {
-        assert_eq!(view_for(false, true, true, true), View::Hud);
+        assert_eq!(view_for(false, true, true, true, false), View::Hud);
     }
 
     #[test]
     fn a_volume_change_should_not_cover_a_pinned_card() {
-        assert_eq!(view_for(false, true, false, true), View::Card);
+        assert_eq!(view_for(false, true, false, true, false), View::Card);
+    }
+
+    #[test]
+    fn a_hidden_notch_should_show_nothing_not_even_pop_ups_or_notices() {
+        for (notice, hud) in [(false, false), (false, true), (true, true)] {
+            assert_eq!(view_for(false, false, notice, hud, true), View::Hidden);
+        }
+    }
+
+    #[test]
+    fn a_hidden_notch_should_open_its_card_under_the_pointer() {
+        assert_eq!(view_for(true, false, false, false, true), View::Card);
+        assert_eq!(view_for(true, false, false, true, true), View::Card);
+    }
+
+    #[test]
+    fn a_pinned_card_should_stay_open_with_auto_hide_on() {
+        assert_eq!(view_for(false, true, false, false, true), View::Card);
+        assert_eq!(view_for(false, true, true, true, true), View::Hud);
+    }
+
+    #[test]
+    fn a_hidden_notch_should_keep_a_strip_at_the_top_edge() {
+        assert_eq!(region_bottom(0.0, 1.0), 2);
+        assert_eq!(region_bottom(0.0, 1.5), 3);
+        assert_eq!(region_bottom(-0.4, 1.0), 2);
+        assert_eq!(region_bottom(30.0, 1.5), 45);
     }
 }
