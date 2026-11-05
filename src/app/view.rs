@@ -88,6 +88,7 @@ impl App {
             notice,
             self.hud.is_some(),
             self.settings.auto_hide,
+            self.input.is_some(),
         )
     }
 
@@ -475,9 +476,18 @@ mod shelf_icon_tests {
 /// What the notch shows: the card while it's open (hovered, pinned, typing into
 /// it or taking a drop) unless a notice is due, else a pop-up, else nothing.
 /// With `auto_hide`, a closed notch shows nothing at all, pop-ups included.
-fn view_for(open: bool, pinned: bool, notice: bool, hud: bool, auto_hide: bool) -> View {
+/// While `typing` into the text box under the card, the card stays: a notice
+/// over it would leave the box alone on screen.
+fn view_for(
+    open: bool,
+    pinned: bool,
+    notice: bool,
+    hud: bool,
+    auto_hide: bool,
+    typing: bool,
+) -> View {
     let open = open || pinned;
-    if open && !notice {
+    if open && (!notice || typing) {
         View::Card
     } else if auto_hide && !open {
         View::Hidden
@@ -505,37 +515,52 @@ mod pinned_card_tests {
 
     #[test]
     fn a_pinned_card_should_stay_open_without_the_pointer() {
-        assert_eq!(view_for(false, true, false, false, false), View::Card);
-        assert_eq!(view_for(false, false, false, false, false), View::Collapsed);
+        assert_eq!(
+            view_for(false, true, false, false, false, false),
+            View::Card
+        );
+        assert_eq!(
+            view_for(false, false, false, false, false, false),
+            View::Collapsed
+        );
     }
 
     #[test]
     fn a_notice_should_still_show_over_a_pinned_card() {
-        assert_eq!(view_for(false, true, true, true, false), View::Hud);
+        assert_eq!(view_for(false, true, true, true, false, false), View::Hud);
     }
 
     #[test]
     fn a_volume_change_should_not_cover_a_pinned_card() {
-        assert_eq!(view_for(false, true, false, true, false), View::Card);
+        assert_eq!(view_for(false, true, false, true, false, false), View::Card);
     }
 
     #[test]
     fn a_hidden_notch_should_show_nothing_not_even_pop_ups_or_notices() {
         for (notice, hud) in [(false, false), (false, true), (true, true)] {
-            assert_eq!(view_for(false, false, notice, hud, true), View::Hidden);
+            assert_eq!(
+                view_for(false, false, notice, hud, true, false),
+                View::Hidden
+            );
         }
     }
 
     #[test]
     fn a_hidden_notch_should_open_its_card_under_the_pointer() {
-        assert_eq!(view_for(true, false, false, false, true), View::Card);
-        assert_eq!(view_for(true, false, false, true, true), View::Card);
+        assert_eq!(view_for(true, false, false, false, true, false), View::Card);
+        assert_eq!(view_for(true, false, false, true, true, false), View::Card);
     }
 
     #[test]
     fn a_pinned_card_should_stay_open_with_auto_hide_on() {
-        assert_eq!(view_for(false, true, false, false, true), View::Card);
-        assert_eq!(view_for(false, true, true, true, true), View::Hud);
+        assert_eq!(view_for(false, true, false, false, true, false), View::Card);
+        assert_eq!(view_for(false, true, true, true, true, false), View::Hud);
+    }
+
+    #[test]
+    fn a_notice_should_wait_while_the_text_box_is_open() {
+        assert_eq!(view_for(true, false, true, true, false, true), View::Card);
+        assert_eq!(view_for(true, false, true, true, false, false), View::Hud);
     }
 
     #[test]
