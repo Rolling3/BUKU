@@ -137,6 +137,19 @@ impl Settings {
         Self::from_loaded(store::load_checked(FILE), Some(in_use))
     }
 
+    /// The settings in the file, to change one value and save them back; `None`
+    /// when the file is there but can't be read, which a save would overwrite.
+    pub fn read_for_update() -> Option<Self> {
+        Self::for_update(store::load_checked(FILE))
+    }
+
+    fn for_update(loaded: Loaded<Settings>) -> Option<Self> {
+        match loaded {
+            Loaded::Unusable => None,
+            loaded => Some(Self::from_loaded(loaded, None)),
+        }
+    }
+
     fn from_loaded(loaded: Loaded<Settings>, in_use: Option<&Settings>) -> Self {
         let mut settings = match (loaded, in_use) {
             (Loaded::Read(settings), _) => settings,
@@ -175,6 +188,18 @@ mod unreadable_file_tests {
     fn an_unreadable_file_at_start_should_keep_lyrics_offline() {
         let settings = Settings::from_loaded(Loaded::Unusable, None);
         assert!(!settings.fetch_lyrics);
+    }
+
+    #[test]
+    fn a_damaged_file_should_never_be_updated_from_defaults() {
+        assert!(Settings::for_update(Loaded::Unusable).is_none());
+        assert!(Settings::for_update(Loaded::Missing).is_some());
+        let read = Settings {
+            focus_minutes: 40,
+            ..Settings::default()
+        };
+        let updated = Settings::for_update(Loaded::Read(read)).map(|s| s.focus_minutes);
+        assert_eq!(updated, Some(40));
     }
 
     #[test]

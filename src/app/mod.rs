@@ -439,7 +439,8 @@ unsafe extern "system" fn wndproc(
             return LRESULT(0);
         }
         if message == msg::SETTINGS_OPEN {
-            settings_window::open(hwnd);
+            let in_use = (*app).settings.clone();
+            settings_window::open(hwnd, &in_use);
             return LRESULT(0);
         }
         if message == msg::SHELF_OPEN {

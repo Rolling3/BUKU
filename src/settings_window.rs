@@ -475,7 +475,9 @@ fn register_class() -> bool {
 }
 
 /// Opens the Settings window, or brings it forward when it's already open.
-pub fn open(notch: HWND) {
+/// Opens the window, or brings it forward. `in_use` are the notch's settings:
+/// shown when the file can't be read, so a click can't save defaults over it.
+pub fn open(notch: HWND, in_use: &Settings) {
     unsafe {
         let open = HWND(OPEN.get() as *mut _);
         if !open.is_invalid() {
@@ -497,7 +499,7 @@ pub fn open(notch: HWND) {
             notch: WindowHandle::new(notch),
             gfx: None,
             scale: 1.0,
-            settings: Settings::load(),
+            settings: Settings::reload(in_use),
             autostart: autostart::is_enabled(),
             screens: display::screens(),
             pending_screen: None,
@@ -721,7 +723,7 @@ unsafe extern "system" fn window_proc(
                 DefWindowProcW(hwnd, message, wparam, lparam)
             }
             WM_ACTIVATE if (wparam.0 & 0xffff) as u32 != WA_INACTIVE => {
-                state.settings = Settings::load();
+                state.settings = Settings::reload(&state.settings);
                 state.autostart = autostart::is_enabled();
                 state.screens = display::screens();
                 state.render();
@@ -750,7 +752,7 @@ unsafe extern "system" fn window_proc(
                 LRESULT(0)
             }
             msg::SETTINGS_RELOAD => {
-                state.settings = Settings::load();
+                state.settings = Settings::reload(&state.settings);
                 state.screens = display::screens();
                 state.render();
                 LRESULT(0)
@@ -845,7 +847,7 @@ impl State {
                 // Screens may have come or gone, or the notch may have been dragged,
                 // since the window opened.
                 self.screens = display::screens();
-                let current = Settings::load().screen;
+                let current = Settings::reload(&self.settings).screen;
                 self.pending_screen = Some(display::step(&self.screens, &current, forward));
                 self.save();
             }
@@ -955,7 +957,7 @@ impl State {
         if let Some(screen) = self.pending_screen.take() {
             self.settings.screen = screen;
         } else {
-            self.settings.screen = Settings::load().screen;
+            self.settings.screen = Settings::reload(&self.settings).screen;
         }
         if self.settings.save().is_ok() {
             self.notch.post(msg::SETTINGS_CHANGED, 0, 0);

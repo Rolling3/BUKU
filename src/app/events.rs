@@ -15,6 +15,21 @@ fn dropped_while_hidden(auto_hide: bool, card_open: bool) -> bool {
     auto_hide && !card_open
 }
 
+/// What to save after the notch was dragged to another screen: the file's
+/// settings (`saved`) with the new screen, nothing when the file already has
+/// it, or the settings in use when the file can't be read (`None`), never
+/// defaults over the user's settings.
+fn screen_save(saved: Option<Settings>, in_use: &Settings) -> Option<Settings> {
+    match saved {
+        Some(saved) if saved.screen == in_use.screen => None,
+        Some(mut saved) => {
+            saved.screen = in_use.screen.clone();
+            Some(saved)
+        }
+        None => Some(in_use.clone()),
+    }
+}
+
 /// What a right-click on `button` does: on a Spotify shortcut (its x
 /// included), removes it; `None` elsewhere, where the menu opens.
 pub(super) fn right_click(button: Option<Button>) -> Option<Button> {
@@ -240,16 +255,16 @@ impl App {
         self.release_capture = release;
         // Only the screen changes: keep anything else as the file has it, in case
         // the Settings window saved a change meanwhile.
-        let mut saved = Settings::load();
-        if saved.screen != self.settings.screen {
-            saved.screen = self.settings.screen.clone();
-            if saved.save().is_ok() {
-                // An open Settings window shows the new screen, and won't put the
-                // old one back with its next save.
-                unsafe {
-                    if let Ok(window) = FindWindowW(w!("BUKU.Settings"), None) {
-                        WindowHandle::new(window).post(msg::SETTINGS_RELOAD, 0, 0);
-                    }
+        // A file that can't be read is written over with the settings in use, not
+        // with defaults; the unreadable one was kept aside as `.bad`.
+        if let Some(saved) = screen_save(Settings::read_for_update(), &self.settings)
+            && saved.save().is_ok()
+        {
+            // An open Settings window shows the new screen, and won't put the
+            // old one back with its next save.
+            unsafe {
+                if let Ok(window) = FindWindowW(w!("BUKU.Settings"), None) {
+                    WindowHandle::new(window).post(msg::SETTINGS_RELOAD, 0, 0);
                 }
             }
         }
@@ -1201,6 +1216,31 @@ mod tests {
             ],
             [true, true, false, false]
         );
+    }
+
+    #[test]
+    fn a_drag_should_save_only_the_screen_and_never_defaults() {
+        let in_use = Settings {
+            screen: r"\\.\DISPLAY2".into(),
+            focus_minutes: 50,
+            ..Settings::default()
+        };
+        let file = Settings {
+            focus_minutes: 45,
+            ..Settings::default()
+        };
+        let saved = screen_save(Some(file), &in_use);
+        assert_eq!(
+            saved.as_ref().map(|s| (s.screen.as_str(), s.focus_minutes)),
+            Some((r"\\.\DISPLAY2", 45))
+        );
+        let damaged = screen_save(None, &in_use);
+        assert_eq!(damaged.map(|s| s.focus_minutes), Some(50));
+        let same = Settings {
+            screen: in_use.screen.clone(),
+            ..Settings::default()
+        };
+        assert!(screen_save(Some(same), &in_use).is_none());
     }
 
     #[test]
